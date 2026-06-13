@@ -16,11 +16,15 @@ winit = "0.30.13"
 
 [profile.dev]
 opt-level = 1
-lto = "thin"
 
 [profile.dev.package."*"]
 opt-level = 3
 
 [profile.release]
 opt-level = 3
-lto = "fat"
+codegen-units = 1
+lto = "thin"
+
+[profile.release.package."*"]
+opt-level = 3
+codegen-units = 1
