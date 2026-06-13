@@ -16,6 +16,7 @@ winit = "0.30.13"
 
 [profile.dev]
 opt-level = 1
+lto = "thin"
 
 [profile.dev.package."*"]
 opt-level = 3
