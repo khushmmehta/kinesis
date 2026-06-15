@@ -3,23 +3,21 @@ mod resources;
 mod texture;
 use std::sync::Arc;
 
-use cgmath::prelude::*;
 use model::Vertex;
 use wgpu::util::DeviceExt;
 use winit::{event_loop::ActiveEventLoop, keyboard::KeyCode, window::Window};
 
-#[rustfmt::skip]
-pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::from_cols(
-    cgmath::Vector4::new(1.0, 0.0, 0.0, 0.0),
-    cgmath::Vector4::new(0.0, 1.0, 0.0, 0.0),
-    cgmath::Vector4::new(0.0, 0.0, 0.5, 0.0),
-    cgmath::Vector4::new(0.0, 0.0, 0.5, 1.0),
-);
+pub const OPENGL_TO_WGPU_MATRIX: nalgebra::Matrix4<f32> = nalgebra::matrix![
+    1.0, 0.0, 0.0, 0.0;
+    0.0, 1.0, 0.0, 0.0;
+    0.0, 0.0, 0.5, 0.0;
+    0.0, 0.0, 0.5, 1.0
+];
 
 struct Camera {
-    eye: cgmath::Point3<f32>,
-    target: cgmath::Point3<f32>,
-    up: cgmath::Vector3<f32>,
+    eye: nalgebra::Point3<f32>,
+    target: nalgebra::Point3<f32>,
+    up: nalgebra::Vector3<f32>,
     aspect: f32,
     fovy: f32,
     znear: f32,
@@ -27,9 +25,10 @@ struct Camera {
 }
 
 impl Camera {
-    fn build_view_projection_matrix(&self) -> cgmath::Matrix4<f32> {
-        let view = cgmath::Matrix4::look_at_rh(self.eye, self.target, self.up);
-        let proj = cgmath::perspective(cgmath::Deg(self.fovy), self.aspect, self.znear, self.zfar);
+    fn build_view_projection_matrix(&self) -> nalgebra::Matrix4<f32> {
+        let view = nalgebra::Matrix4::look_at_rh(&self.eye, &self.target, &self.up);
+        let proj =
+            nalgebra::Matrix4::new_perspective(self.aspect, self.fovy, self.znear, self.zfar);
 
         OPENGL_TO_WGPU_MATRIX * proj * view
     }
@@ -43,9 +42,8 @@ struct CameraUniform {
 
 impl CameraUniform {
     fn new() -> Self {
-        use cgmath::SquareMatrix;
         Self {
-            view_proj: cgmath::Matrix4::identity().into(),
+            view_proj: nalgebra::Matrix4::identity().into(),
         }
     }
 
@@ -96,13 +94,10 @@ impl CameraController {
     }
 
     fn update_camera(&self, camera: &mut Camera) {
-        use cgmath::InnerSpace;
         let forward = camera.target - camera.eye;
         let forward_norm = forward.normalize();
         let forward_mag = forward.magnitude();
 
-        // Prevents glitching when the camera gets too close to the
-        // center of the scene.
         if self.is_forward_pressed && forward_mag > self.speed {
             camera.eye += forward_norm * self.speed;
         }
@@ -110,16 +105,12 @@ impl CameraController {
             camera.eye -= forward_norm * self.speed;
         }
 
-        let right = forward_norm.cross(camera.up);
+        let right = forward_norm.cross(&camera.up);
 
-        // Redo radius calc in case the forward/backward is pressed.
         let forward = camera.target - camera.eye;
         let forward_mag = forward.magnitude();
 
         if self.is_right_pressed {
-            // Rescale the distance between the target and the eye so
-            // that it doesn't change. The eye, therefore, still
-            // lies on the circle made by the target and eye.
             camera.eye = camera.target - (forward + right * self.speed).normalize() * forward_mag;
         }
         if self.is_left_pressed {
@@ -129,8 +120,8 @@ impl CameraController {
 }
 
 struct Instance {
-    position: cgmath::Vector3<f32>,
-    rotation: cgmath::Quaternion<f32>,
+    position: nalgebra::Vector3<f32>,
+    rotation: nalgebra::UnitQuaternion<f32>,
 }
 
 #[repr(C)]
@@ -142,8 +133,8 @@ struct InstanceRaw {
 impl Instance {
     fn to_raw(&self) -> InstanceRaw {
         InstanceRaw {
-            model: (cgmath::Matrix4::from_translation(self.position)
-                * cgmath::Matrix4::from(self.rotation))
+            model: (nalgebra::Matrix4::new_translation(&self.position)
+                * self.rotation.to_homogeneous())
             .into(),
         }
     }
@@ -279,9 +270,9 @@ impl Engine {
             });
 
         let camera = Camera {
-            eye: (0.0, 1.0, 2.0).into(),
-            target: (0.0, 0.0, 0.0).into(),
-            up: cgmath::Vector3::unit_y(),
+            eye: nalgebra::Point3::new(0.0, 1.0, 2.0),
+            target: nalgebra::Point3::new(0.0, 0.0, 0.0),
+            up: nalgebra::Vector3::y(),
             aspect: config.width as f32 / config.height as f32,
             fovy: 45.0,
             znear: 0.1,
@@ -399,15 +390,15 @@ impl Engine {
                     let x = SPACE_BETWEEN * (x as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
                     let z = SPACE_BETWEEN * (z as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
 
-                    let position = cgmath::Vector3 { x, y: 0.0, z };
+                    let position = nalgebra::Vector3::new(x, 0.0, z);
 
-                    let rotation = if position.is_zero() {
-                        cgmath::Quaternion::from_axis_angle(
-                            cgmath::Vector3::unit_z(),
-                            cgmath::Deg(0.0),
-                        )
+                    let rotation = if position.magnitude() == 0.0 {
+                        nalgebra::UnitQuaternion::from_axis_angle(&nalgebra::Vector3::z_axis(), 0.0)
                     } else {
-                        cgmath::Quaternion::from_axis_angle(position.normalize(), cgmath::Deg(45.0))
+                        nalgebra::UnitQuaternion::from_axis_angle(
+                            &nalgebra::Unit::new_normalize(position),
+                            std::f32::consts::FRAC_PI_4,
+                        )
                     };
 
                     Instance { position, rotation }
