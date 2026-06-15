@@ -46,12 +46,14 @@ pub struct Model {
     pub materials: Vec<Material>,
 }
 
+#[allow(unused)]
 pub struct Material {
     pub name: String,
     pub diffuse_texture: texture::Texture,
     pub bind_group: wgpu::BindGroup,
 }
 
+#[allow(unused)]
 pub struct Mesh {
     pub name: String,
     pub vertex_buffer: wgpu::Buffer,
@@ -61,6 +63,7 @@ pub struct Mesh {
 }
 // model.rs
 pub trait DrawModel<'a> {
+    #[allow(unused)]
     fn draw_mesh(
         &mut self,
         mesh: &'a Mesh,
@@ -74,6 +77,7 @@ pub trait DrawModel<'a> {
         instances: Range<u32>,
         camera_bind_group: &'a wgpu::BindGroup,
     );
+    #[allow(unused)]
     fn draw_model(&mut self, model: &'a Model, camera_bind_group: &'a wgpu::BindGroup);
     fn draw_model_instanced(
         &mut self,

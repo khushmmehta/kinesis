@@ -1,4 +1,4 @@
-use image::GenericImageView;
+use image::{DynamicImage, GenericImageView, ImageBuffer};
 
 pub struct Texture {
     #[allow(unused)]
@@ -62,6 +62,34 @@ impl Texture {
     ) -> color_eyre::Result<Self> {
         let img = image::load_from_memory(bytes)?;
         Self::from_image(device, queue, &img, Some(label))
+    }
+
+    pub fn from_gltf_data(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        data: &gltf::image::Data,
+        label: Option<&str>,
+    ) -> color_eyre::Result<Self> {
+        let (w, h) = (data.width, data.height);
+        let p = data.pixels.clone();
+
+        let img = match data.format {
+            gltf::image::Format::R8 => {
+                DynamicImage::ImageLuma8(ImageBuffer::from_raw(w, h, p).unwrap())
+            }
+            gltf::image::Format::R8G8 => {
+                DynamicImage::ImageLumaA8(ImageBuffer::from_raw(w, h, p).unwrap())
+            }
+            gltf::image::Format::R8G8B8 => {
+                DynamicImage::ImageRgb8(ImageBuffer::from_raw(w, h, p).unwrap())
+            }
+            gltf::image::Format::R8G8B8A8 => {
+                DynamicImage::ImageRgba8(ImageBuffer::from_raw(w, h, p).unwrap())
+            }
+            fmt => color_eyre::eyre::bail!("unsupported gltf image format: {:?}", fmt),
+        };
+
+        Self::from_image(device, queue, &img, label)
     }
 
     pub fn from_image(

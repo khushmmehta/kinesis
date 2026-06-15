@@ -1,15 +1,16 @@
-use image::{DynamicImage, ImageBuffer};
+use std::path::PathBuf;
+
 use wgpu::util::DeviceExt;
 
 use super::{model, texture};
 
-pub async fn load_string(file_name: &str) -> color_eyre::Result<String> {
-    let path = std::path::Path::new(env!("OUT_DIR"))
+pub async fn load_path(file_name: &str) -> PathBuf {
+    std::path::Path::new(env!("OUT_DIR"))
         .join("res")
-        .join(file_name);
-    Ok(std::fs::read_to_string(path)?)
+        .join(file_name)
 }
 
+#[allow(unused)]
 pub async fn load_binary(file_name: &str) -> color_eyre::Result<Vec<u8>> {
     let path = std::path::Path::new(env!("OUT_DIR"))
         .join("res")
@@ -17,6 +18,7 @@ pub async fn load_binary(file_name: &str) -> color_eyre::Result<Vec<u8>> {
     Ok(std::fs::read(path)?)
 }
 
+#[allow(unused)]
 pub async fn load_texture(
     file_name: &str,
     device: &wgpu::Device,
@@ -26,52 +28,30 @@ pub async fn load_texture(
     texture::Texture::from_bytes(device, queue, &data, file_name)
 }
 
-fn gltf_to_dynamic_image(data: &gltf::image::Data) -> color_eyre::Result<DynamicImage> {
-    let (w, h) = (data.width, data.height);
-    let p = data.pixels.clone();
-    Ok(match data.format {
-        gltf::image::Format::R8 => {
-            DynamicImage::ImageLuma8(ImageBuffer::from_raw(w, h, p).unwrap())
-        }
-        gltf::image::Format::R8G8 => {
-            DynamicImage::ImageLumaA8(ImageBuffer::from_raw(w, h, p).unwrap())
-        }
-        gltf::image::Format::R8G8B8 => {
-            DynamicImage::ImageRgb8(ImageBuffer::from_raw(w, h, p).unwrap())
-        }
-        gltf::image::Format::R8G8B8A8 => {
-            DynamicImage::ImageRgba8(ImageBuffer::from_raw(w, h, p).unwrap())
-        }
-        fmt => color_eyre::eyre::bail!("unsupported gltf image format: {:?}", fmt),
-    })
-}
-
 pub async fn load_model(
     file_name: &str,
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     layout: &wgpu::BindGroupLayout,
 ) -> color_eyre::Result<model::Model> {
-    let path = std::path::Path::new(env!("OUT_DIR"))
-        .join("res")
-        .join(file_name);
-    let (doc, bufs, imgs) = gltf::import(path)?;
+    let (doc, bufs, imgs) = gltf::import(load_path(file_name).await)?;
 
     let mut materials = Vec::new();
     for mat in doc.materials() {
         let diffuse_texture = match mat.pbr_metallic_roughness().base_color_texture() {
-            Some(info) => {
-                let img = gltf_to_dynamic_image(&imgs[info.texture().source().index()])?;
-                texture::Texture::from_image(device, queue, &img, mat.name())?
-            }
+            Some(info) => texture::Texture::from_gltf_data(
+                device,
+                queue,
+                &imgs[info.texture().source().index()],
+                mat.name(),
+            )?,
             None => {
-                // 1×1 opaque white fallback
-                let img = DynamicImage::ImageRgba8(ImageBuffer::from_pixel(
+                let img = image::DynamicImage::ImageRgba8(image::ImageBuffer::from_pixel(
                     1,
                     1,
                     image::Rgba([255, 0, 255, 255]),
                 ));
-                texture::Texture::from_image(device, queue, &img, Some("white"))?
+                texture::Texture::from_image(device, queue, &img, Some("MISSING_TEXTURE"))?
             }
         };
 
@@ -91,7 +71,7 @@ pub async fn load_model(
         });
 
         materials.push(model::Material {
-            name: mat.name().unwrap_or("").to_string(),
+            name: mat.name().unwrap_or("UNNAMED_MATERIAL").to_string(),
             diffuse_texture,
             bind_group,
         });
