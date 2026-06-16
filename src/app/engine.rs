@@ -7,13 +7,6 @@ use model::Vertex;
 use wgpu::util::DeviceExt;
 use winit::{event_loop::ActiveEventLoop, keyboard::KeyCode, window::Window};
 
-pub const OPENGL_TO_WGPU_MATRIX: nalgebra::Matrix4<f32> = nalgebra::matrix![
-    1.0, 0.0, 0.0, 0.0;
-    0.0, 1.0, 0.0, 0.0;
-    0.0, 0.0, 0.5, 0.0;
-    0.0, 0.0, 0.5, 1.0
-];
-
 struct Camera {
     eye: nalgebra::Point3<f32>,
     target: nalgebra::Point3<f32>,
@@ -30,7 +23,7 @@ impl Camera {
         let proj =
             nalgebra::Matrix4::new_perspective(self.aspect, self.fovy, self.znear, self.zfar);
 
-        OPENGL_TO_WGPU_MATRIX * proj * view
+        proj * view
     }
 }
 
@@ -529,10 +522,7 @@ impl Engine {
 
             use model::DrawModel;
 
-            render_pass.draw_model_instanced(
-                &self.gltf_model,
-                0..self.instances.len() as u32,
-            );
+            render_pass.draw_model_instanced(&self.gltf_model, 0..self.instances.len() as u32);
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
