@@ -1,8 +1,6 @@
-use std::path::PathBuf;
-
-use wgpu::util::DeviceExt;
-
 use super::{model, texture};
+use std::path::PathBuf;
+use wgpu::util::DeviceExt;
 
 pub async fn load_path(file_name: &str) -> PathBuf {
     std::path::Path::new(env!("OUT_DIR"))
@@ -77,60 +75,73 @@ pub async fn load_model(
         });
     }
 
-    let mut meshes = Vec::new();
-    for mesh in doc.meshes() {
-        for primitive in mesh.primitives() {
-            let reader = primitive.reader(|buf| Some(&bufs[buf.index()]));
+    let meshes = doc
+        .meshes()
+        .map(|mesh| {
+            let primitives = mesh
+                .primitives()
+                .map(|prim| {
+                    let reader = prim.reader(|buf| Some(&bufs[buf.index()]));
 
-            let positions: Vec<[f32; 3]> = reader
-                .read_positions()
-                .ok_or_else(|| color_eyre::eyre::anyhow!("primitive missing POSITION"))?
-                .collect();
+                    let positions: Vec<[f32; 3]> = reader
+                        .read_positions()
+                        .ok_or_else(|| color_eyre::eyre::anyhow!("failed to read position(s)"))
+                        .unwrap()
+                        .collect();
 
-            let tex_coords: Vec<[f32; 2]> = reader
-                .read_tex_coords(0)
-                .map(|t| t.into_f32().collect())
-                .unwrap_or_else(|| vec![[0.0, 0.0]; positions.len()]);
+                    let tex_coords: Vec<[f32; 2]> = reader
+                        .read_tex_coords(0)
+                        .map(|t| t.into_f32().collect())
+                        .unwrap_or_else(|| vec![[0.0, 0.0]; positions.len()]);
 
-            let normals: Vec<[f32; 3]> = reader
-                .read_normals()
-                .map(|n| n.collect())
-                .unwrap_or_else(|| vec![[0.0, 0.0, 0.0]; positions.len()]);
+                    let normals: Vec<[f32; 3]> = reader
+                        .read_normals()
+                        .map(|n| n.collect())
+                        .unwrap_or_else(|| vec![[0.0, 0.0, 0.0]; positions.len()]);
 
-            let vertices: Vec<model::ModelVertex> = (0..positions.len())
-                .map(|i| model::ModelVertex {
-                    position: positions[i],
-                    tex_coord: [tex_coords[i][0], 1.0 - tex_coords[i][1]], // flip V
-                    normal: normals[i],
+                    let vertices: Vec<model::ModelVertex> = (0..positions.len())
+                        .map(|i| model::ModelVertex {
+                            position: positions[i],
+                            tex_coord: [tex_coords[i][0], 1.0 - tex_coords[i][1]],
+                            normal: normals[i],
+                        })
+                        .collect();
+
+                    let indices: Vec<u32> = reader
+                        .read_indices()
+                        .ok_or_else(|| color_eyre::eyre::anyhow!("primitive missing indices"))
+                        .unwrap()
+                        .into_u32()
+                        .collect();
+
+                    let vertex_buffer =
+                        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some(&format!("{:?} Vertex Buffer", file_name)),
+                            contents: bytemuck::cast_slice(&vertices),
+                            usage: wgpu::BufferUsages::VERTEX,
+                        });
+                    let index_buffer =
+                        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some(&format!("{:?} Index Buffer", file_name)),
+                            contents: bytemuck::cast_slice(&indices),
+                            usage: wgpu::BufferUsages::INDEX,
+                        });
+
+                    model::Primitive {
+                        vertex_buffer,
+                        index_buffer,
+                        num_elements: indices.len() as u32,
+                        material_id: prim.material().index().unwrap_or(0),
+                    }
                 })
-                .collect();
+                .collect::<Vec<_>>();
 
-            let indices: Vec<u32> = reader
-                .read_indices()
-                .ok_or_else(|| color_eyre::eyre::anyhow!("primitive missing indices"))?
-                .into_u32()
-                .collect();
-
-            let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some(&format!("{:?} Vertex Buffer", file_name)),
-                contents: bytemuck::cast_slice(&vertices),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
-            let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some(&format!("{:?} Index Buffer", file_name)),
-                contents: bytemuck::cast_slice(&indices),
-                usage: wgpu::BufferUsages::INDEX,
-            });
-
-            meshes.push(model::Mesh {
+            model::Mesh {
                 name: mesh.name().unwrap_or(file_name).to_string(),
-                vertex_buffer,
-                index_buffer,
-                num_elements: indices.len() as u32,
-                material: primitive.material().index().unwrap_or(0),
-            });
-        }
-    }
+                primitives,
+            }
+        })
+        .collect::<Vec<_>>();
 
     Ok(model::Model { meshes, materials })
 }

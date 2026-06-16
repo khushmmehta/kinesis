@@ -525,13 +525,13 @@ impl Engine {
 
             render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
             render_pass.set_pipeline(&self.render_pipeline);
+            render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
 
             use model::DrawModel;
 
             render_pass.draw_model_instanced(
                 &self.gltf_model,
                 0..self.instances.len() as u32,
-                &self.camera_bind_group,
             );
         }
 
