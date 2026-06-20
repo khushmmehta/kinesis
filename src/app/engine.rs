@@ -1,3 +1,4 @@
+mod camera;
 mod model;
 mod resources;
 mod texture;
@@ -5,27 +6,12 @@ use std::sync::Arc;
 
 use model::Vertex;
 use wgpu::util::DeviceExt;
-use winit::{event_loop::ActiveEventLoop, keyboard::KeyCode, window::Window};
-
-struct Camera {
-    eye: nalgebra::Point3<f32>,
-    target: nalgebra::Point3<f32>,
-    up: nalgebra::Vector3<f32>,
-    aspect: f32,
-    fovy: f32,
-    znear: f32,
-    zfar: f32,
-}
-
-impl Camera {
-    fn build_view_projection_matrix(&self) -> nalgebra::Matrix4<f32> {
-        let view = nalgebra::Matrix4::look_at_rh(&self.eye, &self.target, &self.up);
-        let proj =
-            nalgebra::Matrix4::new_perspective(self.aspect, self.fovy, self.znear, self.zfar);
-
-        proj * view
-    }
-}
+use winit::{
+    event::{MouseButton, MouseScrollDelta},
+    event_loop::ActiveEventLoop,
+    keyboard::KeyCode,
+    window::Window,
+};
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -40,75 +26,8 @@ impl CameraUniform {
         }
     }
 
-    fn update_view_proj(&mut self, camera: &Camera) {
-        self.view_proj = camera.build_view_projection_matrix().into();
-    }
-}
-
-struct CameraController {
-    speed: f32,
-    is_forward_pressed: bool,
-    is_backward_pressed: bool,
-    is_left_pressed: bool,
-    is_right_pressed: bool,
-}
-
-impl CameraController {
-    fn new(speed: f32) -> Self {
-        Self {
-            speed,
-            is_forward_pressed: false,
-            is_backward_pressed: false,
-            is_left_pressed: false,
-            is_right_pressed: false,
-        }
-    }
-
-    fn handle_key(&mut self, code: KeyCode, is_pressed: bool) -> bool {
-        match code {
-            KeyCode::KeyW | KeyCode::ArrowUp => {
-                self.is_forward_pressed = is_pressed;
-                true
-            }
-            KeyCode::KeyA | KeyCode::ArrowLeft => {
-                self.is_left_pressed = is_pressed;
-                true
-            }
-            KeyCode::KeyS | KeyCode::ArrowDown => {
-                self.is_backward_pressed = is_pressed;
-                true
-            }
-            KeyCode::KeyD | KeyCode::ArrowRight => {
-                self.is_right_pressed = is_pressed;
-                true
-            }
-            _ => false,
-        }
-    }
-
-    fn update_camera(&self, camera: &mut Camera) {
-        let forward = camera.target - camera.eye;
-        let forward_norm = forward.normalize();
-        let forward_mag = forward.magnitude();
-
-        if self.is_forward_pressed && forward_mag > self.speed {
-            camera.eye += forward_norm * self.speed;
-        }
-        if self.is_backward_pressed {
-            camera.eye -= forward_norm * self.speed;
-        }
-
-        let right = forward_norm.cross(&camera.up);
-
-        let forward = camera.target - camera.eye;
-        let forward_mag = forward.magnitude();
-
-        if self.is_right_pressed {
-            camera.eye = camera.target - (forward + right * self.speed).normalize() * forward_mag;
-        }
-        if self.is_left_pressed {
-            camera.eye = camera.target - (forward - right * self.speed).normalize() * forward_mag;
-        }
+    fn update_view_proj(&mut self, camera: &camera::Camera, projection: &camera::Projection) {
+        self.view_proj = (projection.calc_matrix() * camera.calc_matrix()).into();
     }
 }
 
@@ -175,11 +94,13 @@ pub struct Engine {
     is_surface_configured: bool,
     window: Arc<Window>,
     render_pipeline: wgpu::RenderPipeline,
-    camera: Camera,
+    camera: camera::Camera,
+    projection: camera::Projection,
+    pub camera_controller: camera::CameraController,
+    pub mouse_pressed: bool,
     camera_uniform: CameraUniform,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
-    camera_controller: CameraController,
     instances: Vec<Instance>,
     instance_buffer: wgpu::Buffer,
     depth_texture: texture::Texture,
@@ -262,18 +183,12 @@ impl Engine {
                 label: Some("texture_bind_group_layout"),
             });
 
-        let camera = Camera {
-            eye: nalgebra::Point3::new(0.0, 1.0, 2.0),
-            target: nalgebra::Point3::new(0.0, 0.0, 0.0),
-            up: nalgebra::Vector3::y(),
-            aspect: config.width as f32 / config.height as f32,
-            fovy: 45.0,
-            znear: 0.1,
-            zfar: 100.0,
-        };
+        let camera = camera::Camera::new(nalgebra::Point3::new(0.0, 5.0, 10.0), -90f32, -20f32);
+        let projection = camera::Projection::new(config.width, config.height, 45f32, 0.1, 100.0);
+        let camera_controller = camera::CameraController::new(4.0, 2.0);
 
         let mut camera_uniform = CameraUniform::new();
-        camera_uniform.update_view_proj(&camera);
+        camera_uniform.update_view_proj(&camera, &projection);
 
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Camera Buffer"),
@@ -304,8 +219,6 @@ impl Engine {
             }],
             label: Some("camera_bind_group"),
         });
-
-        let camera_controller = CameraController::new(0.2);
 
         let shader =
             device.create_shader_module(wgpu::include_wgsl!("../../res/shaders/shader.wgsl"));
@@ -415,10 +328,12 @@ impl Engine {
             window,
             render_pipeline,
             camera,
+            projection,
+            camera_controller,
             camera_uniform,
+            mouse_pressed: false,
             camera_buffer,
             camera_bind_group,
-            camera_controller,
             instances,
             instance_buffer,
             depth_texture,
@@ -432,16 +347,16 @@ impl Engine {
             self.config.height = height;
             self.surface.configure(&self.device, &self.config);
             self.is_surface_configured = true;
-
-            self.camera.aspect = self.config.width as f32 / self.config.height as f32;
+            self.projection.resize(width, height);
             self.depth_texture =
                 texture::Texture::create_depth_texture(&self.device, &self.config, "depth_texture");
         }
     }
 
-    pub fn update(&mut self) {
-        self.camera_controller.update_camera(&mut self.camera);
-        self.camera_uniform.update_view_proj(&self.camera);
+    pub fn update(&mut self, dt: std::time::Duration) {
+        self.camera_controller.update_camera(&mut self.camera, dt);
+        self.camera_uniform
+            .update_view_proj(&self.camera, &self.projection);
         self.queue.write_buffer(
             &self.camera_buffer,
             0,
@@ -531,11 +446,21 @@ impl Engine {
         Ok(())
     }
 
-    pub fn handle_key(&mut self, event_loop: &ActiveEventLoop, code: KeyCode, is_pressed: bool) {
-        if code == KeyCode::Escape && is_pressed {
-            event_loop.exit();
-        } else {
-            self.camera_controller.handle_key(code, is_pressed);
+    pub fn handle_key(&mut self, event_loop: &ActiveEventLoop, key: KeyCode, is_pressed: bool) {
+        if !self.camera_controller.process_keyboard(key, is_pressed)
+            && let (KeyCode::Escape, true) = (key, is_pressed)
+        {
+            event_loop.exit()
         }
+    }
+
+    pub fn handle_mouse_button(&mut self, button: MouseButton, pressed: bool) {
+        if button == MouseButton::Right {
+            self.mouse_pressed = pressed
+        }
+    }
+
+    pub fn handle_mouse_scroll(&mut self, delta: &MouseScrollDelta) {
+        self.camera_controller.handle_scroll(delta);
     }
 }

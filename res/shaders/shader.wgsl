@@ -34,9 +34,11 @@ fn vs_main(
         instance.model_matrix_3,
     );
 
+    let world_position = model_matrix * vec4<f32>(model.position, 1.0);
+
     var out: VertexOutput;
     out.tex_coords = model.tex_coords;
-    out.clip_position = camera.view_proj * model_matrix * vec4<f32>(model.position, 1.0);
+    out.clip_position = camera.view_proj * world_position;
     return out;
 }
 

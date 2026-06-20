@@ -1,10 +1,10 @@
 mod engine;
-use std::sync::Arc;
+use std::{sync::Arc, time::Instant};
 
 use engine::Engine;
 use winit::{
     application::ApplicationHandler,
-    event::{KeyEvent, WindowEvent},
+    event::{DeviceEvent, KeyEvent, WindowEvent},
     event_loop::ActiveEventLoop,
     keyboard::PhysicalKey,
     window::Window,
@@ -12,11 +12,15 @@ use winit::{
 
 pub struct App {
     engine: Option<Engine>,
+    last_time: Instant,
 }
 
 impl App {
     pub fn new() -> Self {
-        Self { engine: None }
+        Self {
+            engine: None,
+            last_time: Instant::now(),
+        }
     }
 }
 
@@ -35,6 +39,24 @@ impl ApplicationHandler<Engine> for App {
         self.engine = Some(event);
     }
 
+    fn device_event(
+        &mut self,
+        _event_loop: &ActiveEventLoop,
+        _device_id: winit::event::DeviceId,
+        event: winit::event::DeviceEvent,
+    ) {
+        let engine = match &mut self.engine {
+            Some(canvas) => canvas,
+            None => return,
+        };
+
+        if let DeviceEvent::MouseMotion { delta: (dx, dy) } = event
+            && engine.mouse_pressed
+        {
+            engine.camera_controller.handle_mouse(dx, dy);
+        }
+    }
+
     fn window_event(
         &mut self,
         event_loop: &ActiveEventLoop,
@@ -50,24 +72,31 @@ impl ApplicationHandler<Engine> for App {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => engine.resize(size.width, size.height),
             WindowEvent::RedrawRequested => {
-                engine.update();
+                let dt = self.last_time.elapsed();
+                self.last_time = Instant::now();
+                engine.update(dt);
                 match engine.render() {
                     Ok(_) => {}
                     Err(e) => {
+                        // Log the error and exit gracefully
                         log::error!("{e}");
                         event_loop.exit();
                     }
                 }
             }
+            WindowEvent::MouseInput { state, button, .. } => {
+                engine.handle_mouse_button(button, state.is_pressed())
+            }
+            WindowEvent::MouseWheel { delta, .. } => engine.handle_mouse_scroll(&delta),
             WindowEvent::KeyboardInput {
                 event:
                     KeyEvent {
                         physical_key: PhysicalKey::Code(code),
-                        state: key_state,
+                        state,
                         ..
                     },
                 ..
-            } => engine.handle_key(event_loop, code, key_state.is_pressed()),
+            } => engine.handle_key(event_loop, code, state.is_pressed()),
             _ => {}
         }
     }
