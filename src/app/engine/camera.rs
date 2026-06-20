@@ -9,6 +9,8 @@ pub struct Camera {
     pub pitch: f32,
 }
 
+const VERTICAL_CLAMP: f32 = 80f32.to_radians();
+
 impl Camera {
     pub fn new(pos: Point3<f32>, yaw: f32, pitch: f32) -> Self {
         Self {
@@ -166,8 +168,6 @@ impl CameraController {
         self.rotate_horizontal = 0.0;
         self.rotate_vertical = 0.0;
 
-        camera.pitch = camera
-            .pitch
-            .clamp(-std::f32::consts::FRAC_PI_2, std::f32::consts::FRAC_PI_2);
+        camera.pitch = camera.pitch.clamp(-VERTICAL_CLAMP, VERTICAL_CLAMP);
     }
 }
