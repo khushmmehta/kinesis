@@ -143,7 +143,7 @@ impl CameraController {
         let (pitch_sin, pitch_cos) = camera.pitch.sin_cos();
 
         let forward = Vector3::new(yaw_cos, pitch_sin, yaw_sin).normalize();
-        let right = Vector3::new(-yaw_sin, pitch_sin, yaw_cos).normalize();
+        let right = Vector3::new(-yaw_sin, 0.0, yaw_cos).normalize();
 
         camera.pos += forward
             * (self.amount_forward - self.amount_backward)
