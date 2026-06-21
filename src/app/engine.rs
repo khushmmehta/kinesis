@@ -389,9 +389,7 @@ impl Engine {
                 self.surface.configure(&self.device, &self.config);
                 surface_texture
             }
-            wgpu::CurrentSurfaceTexture::Timeout
-            | wgpu::CurrentSurfaceTexture::Occluded
-            | wgpu::CurrentSurfaceTexture::Validation => {
+            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
                 return Ok(());
             }
             wgpu::CurrentSurfaceTexture::Outdated => {
@@ -400,6 +398,12 @@ impl Engine {
             }
             wgpu::CurrentSurfaceTexture::Lost => {
                 color_eyre::eyre::bail!("Lost device");
+            }
+            wgpu::CurrentSurfaceTexture::Validation => {
+                let error_scope = self.device.push_error_scope(wgpu::ErrorFilter::Validation);
+                let error_future = error_scope.pop();
+                let error = pollster::block_on(error_future).unwrap();
+                return Err(color_eyre::Report::new(error));
             }
         };
 
