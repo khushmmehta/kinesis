@@ -14,6 +14,7 @@ pub struct App {
     engine: Option<Engine>,
     last_time: Instant,
     i: std::time::Duration,
+    n: u32,
     polled_frametime: f32,
 }
 
@@ -23,6 +24,7 @@ impl App {
             engine: None,
             last_time: Instant::now(),
             i: std::time::Duration::ZERO,
+            n: 0,
             polled_frametime: 0.0,
         }
     }
@@ -30,6 +32,7 @@ impl App {
 
 impl ApplicationHandler<Engine> for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
         #[allow(unused_mut)]
         let mut window_attributes = Window::default_attributes();
 
@@ -81,11 +84,14 @@ impl ApplicationHandler<Engine> for App {
                 let dt = self.last_time.elapsed();
                 self.last_time = Instant::now();
                 engine.update(dt);
+                println!("{:.2}", dt.as_secs_f32() * 1000.0);
 
                 self.i += dt;
-                if self.i.as_millis() > 200 {
-                    self.polled_frametime = dt.as_secs_f32() * 1000.0;
+                self.n += 1;
+                if self.i.as_millis() > 100 {
+                    self.polled_frametime = (self.i.as_secs_f32() / self.n as f32) * 1000.0;
                     self.i = std::time::Duration::ZERO;
+                    self.n = 0;
                 }
 
                 match engine.render(self.polled_frametime) {
@@ -111,6 +117,12 @@ impl ApplicationHandler<Engine> for App {
                 ..
             } => engine.handle_key(event_loop, code, state.is_pressed()),
             _ => {}
+        }
+    }
+
+    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+        if let Some(engine) = &self.engine {
+            engine.request_redraw();
         }
     }
 }

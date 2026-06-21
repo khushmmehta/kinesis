@@ -9,7 +9,12 @@ color-eyre = "0.6.5"
 eframe = "0.34.3"
 egui-winit = "0.34.3"
 env_logger = "0.11.10"
-gltf = { version = "1.4.1", features = ["extensions", "extras", "import", "utils"] }
+gltf = { version = "1.4.1", features = [
+  "extensions",
+  "extras",
+  "import",
+  "utils",
+] }
 image = { version = "0.25.10", features = ["jpeg", "png"] }
 log = "0.4.32"
 nalgebra = "0.35.0"

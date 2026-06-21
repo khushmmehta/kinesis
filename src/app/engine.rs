@@ -157,7 +157,7 @@ impl Engine {
             format: surface_format,
             width: size.width,
             height: size.height,
-            present_mode: surface_caps.present_modes[0],
+            present_mode: wgpu::PresentMode::Immediate,
             alpha_mode: surface_caps.alpha_modes[0],
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
@@ -477,10 +477,18 @@ impl Engine {
             );
         }
 
+        self.window.pre_present_notify();
+
         self.queue.submit(std::iter::once(encoder.finish()));
         output.present();
 
+        self.window.request_redraw();
+
         Ok(())
+    }
+
+    pub fn request_redraw(&self) {
+        self.window.request_redraw();
     }
 
     pub fn handle_egui_input(&mut self, event: &winit::event::WindowEvent) {
