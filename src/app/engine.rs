@@ -4,6 +4,7 @@ mod resources;
 mod texture;
 use std::sync::Arc;
 
+use eframe::{egui, egui_wgpu};
 use model::Vertex;
 use wgpu::util::DeviceExt;
 use winit::{
@@ -105,6 +106,9 @@ pub struct Engine {
     instance_buffer: wgpu::Buffer,
     depth_texture: texture::Texture,
     gltf_model: model::Model,
+    egui_renderer: egui_wgpu::Renderer,
+    egui_ctx: egui::Context,
+    egui_state: egui_winit::State,
 }
 
 impl Engine {
@@ -182,6 +186,22 @@ impl Engine {
                 ],
                 label: Some("texture_bind_group_layout"),
             });
+
+        let egui_ctx = egui::Context::default();
+        let egui_state = egui_winit::State::new(
+            egui_ctx.clone(),
+            egui::ViewportId::ROOT,
+            &*window,
+            None,
+            None,
+            None,
+        );
+
+        let egui_renderer = egui_wgpu::Renderer::new(
+            &device,
+            surface_format,
+            egui_wgpu::RendererOptions::default(),
+        );
 
         let camera = camera::Camera::new(nalgebra::Point3::new(0.0, 5.0, 10.0), -90f32, -20f32);
         let projection = camera::Projection::new(config.width, config.height, 45f32, 0.1, 100.0);
@@ -338,6 +358,9 @@ impl Engine {
             instance_buffer,
             depth_texture,
             gltf_model,
+            egui_renderer,
+            egui_ctx,
+            egui_state,
         })
     }
 
@@ -371,6 +394,25 @@ impl Engine {
             return Ok(());
         }
 
+        let raw_input = self.egui_state.take_egui_input(&self.window);
+
+        let egui_output = self.egui_ctx.run_ui(raw_input, |ctx| {
+            egui::Window::new("Statistics").show(ctx, |ui| {
+                ui.label("Hello from Kinesis!");
+            });
+        });
+
+        self.egui_state
+            .handle_platform_output(&self.window, egui_output.platform_output);
+
+        let primitives = self
+            .egui_ctx
+            .tessellate(egui_output.shapes, egui_output.pixels_per_point);
+        let screen_descriptor = egui_wgpu::ScreenDescriptor {
+            size_in_pixels: [self.config.width, self.config.height],
+            pixels_per_point: egui_output.pixels_per_point,
+        };
+
         let output = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(surface_texture) => surface_texture,
             wgpu::CurrentSurfaceTexture::Suboptimal(surface_texture) => {
@@ -400,6 +442,18 @@ impl Engine {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("Render Encoder"),
             });
+
+        for (id, delta) in &egui_output.textures_delta.set {
+            self.egui_renderer
+                .update_texture(&self.device, &self.queue, *id, delta);
+        }
+        self.egui_renderer.update_buffers(
+            &self.device,
+            &self.queue,
+            &mut encoder,
+            &primitives,
+            &screen_descriptor,
+        );
 
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -438,6 +492,30 @@ impl Engine {
             use model::DrawModel;
 
             render_pass.draw_model_instanced(&self.gltf_model, 0..self.instances.len() as u32);
+        }
+
+        {
+            let mut render_pass = encoder
+                .begin_render_pass(&wgpu::RenderPassDescriptor {
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &view,
+                        resolve_target: None,
+                        depth_slice: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    ..Default::default()
+                })
+                .forget_lifetime();
+
+            self.egui_renderer
+                .render(&mut render_pass, &primitives, &screen_descriptor);
+        }
+
+        for id in &egui_output.textures_delta.free {
+            self.egui_renderer.free_texture(id);
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
