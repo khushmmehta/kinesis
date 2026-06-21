@@ -68,6 +68,8 @@ impl ApplicationHandler<Engine> for App {
             None => return,
         };
 
+        engine.handle_egui_input(&event);
+
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => engine.resize(size.width, size.height),

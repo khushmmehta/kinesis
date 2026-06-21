@@ -6,7 +6,8 @@ edition = "2024"
 [dependencies]
 bytemuck = { version = "1.25.0", features = ["derive"] }
 color-eyre = "0.6.5"
-egui = "0.34.3"
+eframe = "0.34.3"
+egui-winit = "0.34.3"
 env_logger = "0.11.10"
 gltf = { version = "1.4.1", features = ["extensions", "extras", "import", "utils"] }
 image = { version = "0.25.10", features = ["jpeg", "png"] }
