@@ -227,7 +227,7 @@ impl Engine {
         });
 
         let shader =
-            device.create_shader_module(wgpu::include_wgsl!("../../res/shaders/shader.wgsl"));
+            device.create_shader_module(wgpu::include_spirv!("../../res/shaders/shader.spv"));
 
         let depth_texture =
             texture::Texture::create_depth_texture(&device, &config, "depth_texture");

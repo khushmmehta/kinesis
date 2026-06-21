@@ -14,7 +14,7 @@ image = { version = "0.25.10", features = ["jpeg", "png"] }
 log = "0.4.32"
 nalgebra = "0.35.0"
 pollster = "0.4.0"
-wgpu = "29.0.3"
+wgpu = { version = "29.0.3", features = ["spirv"] }
 winit = "0.30.13"
 
 [profile.dev]
