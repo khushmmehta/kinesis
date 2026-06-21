@@ -371,7 +371,7 @@ impl Engine {
         );
     }
 
-    pub fn render(&mut self) -> color_eyre::Result<()> {
+    pub fn render(&mut self, frametime: f32) -> color_eyre::Result<()> {
         self.window.request_redraw();
 
         if !self.is_surface_configured {
@@ -455,13 +455,13 @@ impl Engine {
         {
             self.egui_renderer.begin_frame(&self.window);
 
-            egui::Window::new("Kinesis EGUI Window")
-                .resizable(true)
-                .vscroll(true)
-                .default_open(false)
-                .show(self.egui_renderer.context(), |ui| {
-                    ui.label("Statistics here!");
-                });
+            egui::Window::new("Statistics").resizable(true).show(
+                self.egui_renderer.context(),
+                |ui| {
+                    ui.label(format!("{frametime:.2}ms"));
+                    ui.label(format!("{:.2}FPS", 1000.0 / frametime));
+                },
+            );
 
             self.egui_renderer.end_frame_and_draw(
                 &self.device,
