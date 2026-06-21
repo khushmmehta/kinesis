@@ -14,7 +14,7 @@ pub struct App {
     engine: Option<Engine>,
     last_time: Instant,
     i: std::time::Duration,
-    polled_frametime: u32,
+    polled_frametime: f32,
 }
 
 impl App {
@@ -23,7 +23,7 @@ impl App {
             engine: None,
             last_time: Instant::now(),
             i: std::time::Duration::ZERO,
-            polled_frametime: 0,
+            polled_frametime: 0.0,
         }
     }
 }
@@ -72,6 +72,8 @@ impl ApplicationHandler<Engine> for App {
             None => return,
         };
 
+        engine.handle_egui_input(&event);
+
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => engine.resize(size.width, size.height),
@@ -82,7 +84,7 @@ impl ApplicationHandler<Engine> for App {
 
                 self.i += dt;
                 if self.i.as_millis() > 200 {
-                    self.polled_frametime = dt.as_millis() as u32;
+                    self.polled_frametime = dt.as_secs_f32() * 1000.0;
                     self.i = std::time::Duration::ZERO;
                 }
 

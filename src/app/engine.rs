@@ -1,4 +1,5 @@
 mod camera;
+mod egui_renderer;
 mod model;
 mod resources;
 mod texture;
@@ -106,9 +107,7 @@ pub struct Engine {
     instance_buffer: wgpu::Buffer,
     depth_texture: texture::Texture,
     gltf_model: model::Model,
-    egui_renderer: egui_wgpu::Renderer,
-    egui_ctx: egui::Context,
-    egui_state: egui_winit::State,
+    egui_renderer: egui_renderer::EguiRenderer,
 }
 
 impl Engine {
@@ -187,21 +186,8 @@ impl Engine {
                 label: Some("texture_bind_group_layout"),
             });
 
-        let egui_ctx = egui::Context::default();
-        let egui_state = egui_winit::State::new(
-            egui_ctx.clone(),
-            egui::ViewportId::ROOT,
-            &*window,
-            None,
-            None,
-            None,
-        );
-
-        let egui_renderer = egui_wgpu::Renderer::new(
-            &device,
-            surface_format,
-            egui_wgpu::RendererOptions::default(),
-        );
+        let egui_renderer =
+            egui_renderer::EguiRenderer::new(&device, surface_format, None, 1, &window);
 
         let camera = camera::Camera::new(nalgebra::Point3::new(0.0, 5.0, 10.0), -90f32, -20f32);
         let projection = camera::Projection::new(config.width, config.height, 45f32, 0.1, 100.0);
@@ -359,8 +345,6 @@ impl Engine {
             depth_texture,
             gltf_model,
             egui_renderer,
-            egui_ctx,
-            egui_state,
         })
     }
 
@@ -387,30 +371,16 @@ impl Engine {
         );
     }
 
-    pub fn render(&mut self, frametime: u32) -> color_eyre::Result<()> {
+    pub fn render(&mut self, frametime: f32) -> color_eyre::Result<()> {
         self.window.request_redraw();
 
         if !self.is_surface_configured {
             return Ok(());
         }
 
-        let raw_input = self.egui_state.take_egui_input(&self.window);
-
-        let egui_output = self.egui_ctx.run_ui(raw_input, |ctx| {
-            egui::Window::new("Statistics").show(ctx, |ui| {
-                ui.label(format!("{}ms", frametime));
-            });
-        });
-
-        self.egui_state
-            .handle_platform_output(&self.window, egui_output.platform_output);
-
-        let primitives = self
-            .egui_ctx
-            .tessellate(egui_output.shapes, egui_output.pixels_per_point);
         let screen_descriptor = egui_wgpu::ScreenDescriptor {
             size_in_pixels: [self.config.width, self.config.height],
-            pixels_per_point: egui_output.pixels_per_point,
+            pixels_per_point: self.window.scale_factor() as f32,
         };
 
         let output = match self.surface.get_current_texture() {
@@ -495,33 +465,34 @@ impl Engine {
         }
 
         {
-            let mut render_pass = encoder
-                .begin_render_pass(&wgpu::RenderPassDescriptor {
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &view,
-                        resolve_target: None,
-                        depth_slice: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Load,
-                            store: wgpu::StoreOp::Store,
-                        },
-                    })],
-                    ..Default::default()
-                })
-                .forget_lifetime();
+            self.egui_renderer.begin_frame(&self.window);
 
-            self.egui_renderer
-                .render(&mut render_pass, &primitives, &screen_descriptor);
-        }
+            egui::Window::new("Statistics").resizable(true).show(
+                self.egui_renderer.context(),
+                |ui| {
+                    ui.label(format!("{frametime:.2}ms"));
+                    ui.label(format!("{:.2}FPS", 1000.0 / frametime));
+                },
+            );
 
-        for id in &egui_output.textures_delta.free {
-            self.egui_renderer.free_texture(id);
+            self.egui_renderer.end_frame_and_draw(
+                &self.device,
+                &self.queue,
+                &mut encoder,
+                &self.window,
+                &view,
+                screen_descriptor,
+            );
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
         output.present();
 
         Ok(())
+    }
+
+    pub fn handle_egui_input(&mut self, event: &winit::event::WindowEvent) {
+        self.egui_renderer.handle_input(&self.window, event);
     }
 
     pub fn handle_key(&mut self, event_loop: &ActiveEventLoop, key: KeyCode, is_pressed: bool) {
