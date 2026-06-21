@@ -413,18 +413,6 @@ impl Engine {
                 label: Some("Render Encoder"),
             });
 
-        for (id, delta) in &egui_output.textures_delta.set {
-            self.egui_renderer
-                .update_texture(&self.device, &self.queue, *id, delta);
-        }
-        self.egui_renderer.update_buffers(
-            &self.device,
-            &self.queue,
-            &mut encoder,
-            &primitives,
-            &screen_descriptor,
-        );
-
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Render Pass"),
