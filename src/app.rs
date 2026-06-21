@@ -13,6 +13,8 @@ use winit::{
 pub struct App {
     engine: Option<Engine>,
     last_time: Instant,
+    i: std::time::Duration,
+    polled_frametime: u32,
 }
 
 impl App {
@@ -20,6 +22,8 @@ impl App {
         Self {
             engine: None,
             last_time: Instant::now(),
+            i: std::time::Duration::ZERO,
+            polled_frametime: 0,
         }
     }
 }
@@ -75,7 +79,14 @@ impl ApplicationHandler<Engine> for App {
                 let dt = self.last_time.elapsed();
                 self.last_time = Instant::now();
                 engine.update(dt);
-                match engine.render() {
+
+                self.i += dt;
+                if self.i.as_millis() > 200 {
+                    self.polled_frametime = dt.as_millis() as u32;
+                    self.i = std::time::Duration::ZERO;
+                }
+
+                match engine.render(self.polled_frametime) {
                     Ok(_) => {}
                     Err(e) => {
                         // Log the error and exit gracefully

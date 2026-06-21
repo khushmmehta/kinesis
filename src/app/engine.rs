@@ -387,7 +387,7 @@ impl Engine {
         );
     }
 
-    pub fn render(&mut self) -> color_eyre::Result<()> {
+    pub fn render(&mut self, frametime: u32) -> color_eyre::Result<()> {
         self.window.request_redraw();
 
         if !self.is_surface_configured {
@@ -398,7 +398,7 @@ impl Engine {
 
         let egui_output = self.egui_ctx.run_ui(raw_input, |ctx| {
             egui::Window::new("Statistics").show(ctx, |ui| {
-                ui.label("Hello from Kinesis!");
+                ui.label(format!("{}ms", frametime));
             });
         });
 
