@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use nalgebra::{Matrix4, Point3, Vector3};
 use winit::{dpi::PhysicalPosition, event::MouseScrollDelta, keyboard::KeyCode};
 
@@ -138,9 +136,7 @@ impl CameraController {
         }
     }
 
-    pub fn update_camera(&mut self, camera: &mut Camera, dt: Duration) {
-        let dt = dt.as_secs_f32();
-
+    pub fn update_camera(&mut self, camera: &mut Camera, dt: f32) {
         let (yaw_sin, yaw_cos) = camera.yaw.sin_cos();
         let (pitch_sin, pitch_cos) = camera.pitch.sin_cos();
 

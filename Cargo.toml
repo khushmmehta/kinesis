@@ -10,6 +10,7 @@ eframe = "0.34.3"
 egui-winit = "0.34.3"
 env_logger = "0.11.10"
 gltf = { version = "1.4.1", features = [
+  "KHR_texture_transform",
   "extensions",
   "extras",
   "import",
@@ -18,7 +19,9 @@ gltf = { version = "1.4.1", features = [
 image = { version = "0.25.10", features = ["jpeg", "png"] }
 log = "0.4.32"
 nalgebra = "0.35.0"
+num-format = { version = "0.4.4", default-features = false }
 pollster = "0.4.0"
+rayon = "1.12.0"
 wgpu = { version = "29.0.3", features = ["spirv"] }
 winit = "0.30.13"
 

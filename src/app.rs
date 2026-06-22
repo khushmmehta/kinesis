@@ -1,7 +1,9 @@
 mod engine;
-use std::{sync::Arc, time::Instant};
+use std::{collections::VecDeque, sync::Arc, time::Instant};
 
 use engine::Engine;
+
+use rayon::prelude::*;
 use winit::{
     application::ApplicationHandler,
     event::{DeviceEvent, KeyEvent, WindowEvent},
@@ -10,12 +12,12 @@ use winit::{
     window::Window,
 };
 
+const DEQUE_SIZE: usize = 1000;
+
 pub struct App {
     engine: Option<Engine>,
     last_time: Instant,
-    i: std::time::Duration,
-    n: u32,
-    polled_frametime: f32,
+    frametimes: VecDeque<f32>,
 }
 
 impl App {
@@ -23,9 +25,7 @@ impl App {
         Self {
             engine: None,
             last_time: Instant::now(),
-            i: std::time::Duration::ZERO,
-            n: 0,
-            polled_frametime: 0.0,
+            frametimes: VecDeque::with_capacity(DEQUE_SIZE + 1),
         }
     }
 }
@@ -81,23 +81,21 @@ impl ApplicationHandler<Engine> for App {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => engine.resize(size.width, size.height),
             WindowEvent::RedrawRequested => {
-                let dt = self.last_time.elapsed();
-                self.last_time = Instant::now();
-                engine.update(dt);
-                println!("{:.2}", dt.as_secs_f32() * 1000.0);
-
-                self.i += dt;
-                self.n += 1;
-                if self.i.as_millis() > 100 {
-                    self.polled_frametime = (self.i.as_secs_f32() / self.n as f32) * 1000.0;
-                    self.i = std::time::Duration::ZERO;
-                    self.n = 0;
+                self.frametimes
+                    .push_back(self.last_time.elapsed().as_secs_f32());
+                if self.frametimes.len() > DEQUE_SIZE {
+                    self.frametimes.pop_front();
                 }
+                self.last_time = Instant::now();
 
-                match engine.render(self.polled_frametime) {
+                engine.update(*self.frametimes.back().unwrap_or(&0f32));
+
+                match engine.render(
+                    1000.0 * self.frametimes.par_iter().sum::<f32>() / self.frametimes.len() as f32,
+                    percentile_low(&self.frametimes, 1.0),
+                ) {
                     Ok(_) => {}
                     Err(e) => {
-                        // Log the error and exit gracefully
                         log::error!("{e}");
                         event_loop.exit();
                     }
@@ -119,10 +117,13 @@ impl ApplicationHandler<Engine> for App {
             _ => {}
         }
     }
+}
 
-    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
-        if let Some(engine) = &self.engine {
-            engine.request_redraw();
-        }
-    }
+fn percentile_low(frametimes: &VecDeque<f32>, percent: f32) -> f32 {
+    let count = ((frametimes.len() as f32) * percent / 100.0).ceil() as usize;
+    let count = count.max(1);
+    let mut sorted: Vec<f32> = frametimes.clone().into();
+    sorted.par_sort_unstable_by(|a, b| b.partial_cmp(a).unwrap());
+
+    sorted[..count].par_iter().sum::<f32>() / count as f32
 }
