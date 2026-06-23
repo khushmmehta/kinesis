@@ -19,18 +19,18 @@ use winit::{
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct CameraUniform {
-    view_proj: [[f32; 4]; 4],
+    view_proj: nalgebra::Matrix4<f32>,
 }
 
 impl CameraUniform {
     fn new() -> Self {
         Self {
-            view_proj: nalgebra::Matrix4::identity().into(),
+            view_proj: nalgebra::Matrix4::identity(),
         }
     }
 
     fn update_view_proj(&mut self, camera: &camera::Camera, projection: &camera::Projection) {
-        self.view_proj = (projection.calc_matrix() * camera.calc_matrix()).into();
+        self.view_proj = projection.calc_matrix() * camera.calc_matrix();
     }
 }
 
@@ -42,15 +42,14 @@ struct Instance {
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct InstanceRaw {
-    model: [[f32; 4]; 4],
+    model: nalgebra::Matrix4<f32>,
 }
 
 impl Instance {
     fn to_raw(&self) -> InstanceRaw {
         InstanceRaw {
             model: (nalgebra::Matrix4::new_translation(&self.position)
-                * self.rotation.to_homogeneous())
-            .into(),
+                * self.rotation.to_homogeneous()),
         }
     }
 }

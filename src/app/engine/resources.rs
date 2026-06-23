@@ -103,9 +103,12 @@ pub async fn load_model(
 
                     let vertices: Vec<model::ModelVertex> = (0..positions.len())
                         .map(|i| model::ModelVertex {
-                            position: positions[i],
-                            tex_coord: [tex_coords[i][0], 1.0 - tex_coords[i][1]],
-                            normal: normals[i],
+                            position: nalgebra::Point3::from(positions[i]),
+                            tex_coord: nalgebra::Point2::from([
+                                tex_coords[i][0],
+                                1.0 - tex_coords[i][1],
+                            ]),
+                            normal: nalgebra::Point3::from(normals[i]),
                         })
                         .collect();
 

@@ -9,9 +9,9 @@ pub trait Vertex {
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct ModelVertex {
-    pub position: [f32; 3],
-    pub tex_coord: [f32; 2],
-    pub normal: [f32; 3],
+    pub position: nalgebra::Point3<f32>,
+    pub tex_coord: nalgebra::Point2<f32>,
+    pub normal: nalgebra::Point3<f32>,
 }
 
 impl Vertex for ModelVertex {

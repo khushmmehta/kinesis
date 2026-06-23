@@ -18,7 +18,7 @@ gltf = { version = "1.4.1", features = [
 ] }
 image = { version = "0.25.10", features = ["jpeg", "png"] }
 log = "0.4.32"
-nalgebra = "0.35.0"
+nalgebra = { version = "0.35.0", features = ["bytemuck"] }
 num-format = { version = "0.4.4", default-features = false }
 pollster = "0.4.0"
 rayon = "1.12.0"
