@@ -68,6 +68,8 @@ pub async fn load_model(
             label: None,
         });
 
+        super::mipmapper::generate_mipmaps(device, queue, &diffuse_texture);
+
         materials.push(model::Material {
             name: mat.name().unwrap_or("UNNAMED_MATERIAL").to_string(),
             diffuse_texture,

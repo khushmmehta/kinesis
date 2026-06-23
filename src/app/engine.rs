@@ -1,5 +1,6 @@
 mod camera;
 mod egui_renderer;
+mod mipmapper;
 mod model;
 mod resources;
 mod texture;
