@@ -74,12 +74,6 @@ impl Texture {
         let p = data.pixels.clone();
 
         let img = match data.format {
-            gltf::image::Format::R8 => {
-                DynamicImage::ImageLuma8(ImageBuffer::from_raw(w, h, p).unwrap())
-            }
-            gltf::image::Format::R8G8 => {
-                DynamicImage::ImageLumaA8(ImageBuffer::from_raw(w, h, p).unwrap())
-            }
             gltf::image::Format::R8G8B8 => {
                 DynamicImage::ImageRgb8(ImageBuffer::from_raw(w, h, p).unwrap())
             }

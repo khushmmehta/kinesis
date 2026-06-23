@@ -547,7 +547,7 @@ impl Engine {
             );
         }
 
-        self.queue.submit(std::iter::once(encoder.finish()));
+        self.queue.submit([encoder.finish()]);
         output.present();
 
         let stats_slice = self.stats_staging_buffer.slice(..);
