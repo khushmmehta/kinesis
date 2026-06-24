@@ -1,6 +1,24 @@
 use nalgebra::{Matrix4, Point3, Vector3};
 use winit::{dpi::PhysicalPosition, event::MouseScrollDelta, keyboard::KeyCode};
 
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct CameraUniform {
+    view_proj: Matrix4<f32>,
+}
+
+impl CameraUniform {
+    pub fn new() -> Self {
+        Self {
+            view_proj: Matrix4::identity(),
+        }
+    }
+
+    pub fn update_view_proj(&mut self, camera: &Camera, projection: &Projection) {
+        self.view_proj = projection.calc_matrix() * camera.calc_matrix();
+    }
+}
+
 pub struct Camera {
     pub pos: Point3<f32>,
     pub yaw: f32,

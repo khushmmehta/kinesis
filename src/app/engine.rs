@@ -17,24 +17,6 @@ use winit::{
     window::Window,
 };
 
-#[repr(C)]
-#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-struct CameraUniform {
-    view_proj: na::Matrix4<f32>,
-}
-
-impl CameraUniform {
-    fn new() -> Self {
-        Self {
-            view_proj: na::Matrix4::identity(),
-        }
-    }
-
-    fn update_view_proj(&mut self, camera: &camera::Camera, projection: &camera::Projection) {
-        self.view_proj = projection.calc_matrix() * camera.calc_matrix();
-    }
-}
-
 struct Instance {
     position: na::Vector3<f32>,
     rotation: na::UnitQuaternion<f32>,
@@ -94,25 +76,31 @@ pub struct Engine {
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
+    // ABSTRACT AWAY THE QUERIES
     query_set: wgpu::QuerySet,
     stats_buffer: wgpu::Buffer,
     stats_staging_buffer: wgpu::Buffer,
     stats_data: [u64; NUM_PIPELINE_STATISTICS_QUERIES as usize],
     stat_num_buf: num_format::Buffer,
+    //
     is_surface_configured: bool,
     window: Arc<Window>,
     render_pipeline: wgpu::RenderPipeline,
+    // CAMERA SHOULD NOT BE A PART OF THE RENDER PIPELINE
     camera: camera::Camera,
     projection: camera::Projection,
     pub camera_controller: camera::CameraController,
     pub mouse_pressed: bool,
-    camera_uniform: CameraUniform,
+    camera_uniform: camera::CameraUniform,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
+    //
+    depth_texture: texture::Texture,
+    // MODEL DATA SHOULD BE DYNAMIC AND NOT HARD CODED INTO THE PIPELINE
     instances: Vec<Instance>,
     instance_buffer: wgpu::Buffer,
-    depth_texture: texture::Texture,
     gltf_model: model::Model,
+    //
     egui_renderer: egui_renderer::EguiRenderer,
 }
 
@@ -223,7 +211,7 @@ impl Engine {
         let projection = camera::Projection::new(config.width, config.height, 45f32, 0.1, 1000.0);
         let camera_controller = camera::CameraController::new(4.0, 2.0);
 
-        let mut camera_uniform = CameraUniform::new();
+        let mut camera_uniform = camera::CameraUniform::new();
         camera_uniform.update_view_proj(&camera, &projection);
 
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
