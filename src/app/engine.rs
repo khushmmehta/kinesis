@@ -6,6 +6,7 @@ mod resources;
 mod texture;
 use std::sync::Arc;
 
+use bytemuck::Zeroable;
 use eframe::{egui, egui_wgpu};
 use model::Vertex;
 use wgpu::util::DeviceExt;
@@ -15,6 +16,8 @@ use winit::{
     keyboard::KeyCode,
     window::Window,
 };
+
+use crate::app::engine::camera::BoundingVolume;
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -29,8 +32,14 @@ impl CameraUniform {
         }
     }
 
-    fn update_view_proj(&mut self, camera: &camera::Camera, projection: &camera::Projection) {
+    fn update_view_proj(
+        &mut self,
+        camera: &camera::Camera,
+        projection: &camera::Projection,
+        frustum: &mut camera::Frustum,
+    ) {
         self.view_proj = projection.calc_matrix() * camera.calc_matrix();
+        frustum.create_from_camera_projection(&self.view_proj);
     }
 }
 
@@ -106,6 +115,7 @@ pub struct Engine {
     projection: camera::Projection,
     pub camera_controller: camera::CameraController,
     pub mouse_pressed: bool,
+    camera_frustum: camera::Frustum,
     camera_uniform: CameraUniform,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
@@ -114,6 +124,7 @@ pub struct Engine {
     depth_texture: texture::Texture,
     gltf_model: model::Model,
     egui_renderer: egui_renderer::EguiRenderer,
+    visible_instance_count: u32,
 }
 
 impl Engine {
@@ -222,9 +233,10 @@ impl Engine {
         let camera = camera::Camera::new(nalgebra::Point3::new(0.0, 5.0, 10.0), -90f32, -20f32);
         let projection = camera::Projection::new(config.width, config.height, 45f32, 0.1, 1000.0);
         let camera_controller = camera::CameraController::new(4.0, 2.0);
+        let mut camera_frustum = camera::Frustum::zeroed();
 
         let mut camera_uniform = CameraUniform::new();
-        camera_uniform.update_view_proj(&camera, &projection);
+        camera_uniform.update_view_proj(&camera, &projection, &mut camera_frustum);
 
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Camera Buffer"),
@@ -348,7 +360,20 @@ impl Engine {
             })
             .collect::<Vec<_>>();
 
-        let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
+        let instance_data = instances
+            .iter()
+            .map(Instance::to_raw)
+            .filter(|x| {
+                let aabb = camera::CustomAABB::new(
+                    x.model.column(3).xyz(),
+                    nalgebra::Vector3::new(1.0, 1.0, 1.0),
+                );
+                aabb.is_in_frustum(&camera_frustum, x)
+            })
+            .collect::<Vec<_>>();
+
+        let visible_instance_count = instance_data.len() as u32;
+
         let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Instance Buffer"),
             contents: bytemuck::cast_slice(&instance_data),
@@ -371,6 +396,7 @@ impl Engine {
             camera,
             projection,
             camera_controller,
+            camera_frustum,
             camera_uniform,
             mouse_pressed: false,
             camera_buffer,
@@ -380,6 +406,7 @@ impl Engine {
             depth_texture,
             gltf_model,
             egui_renderer,
+            visible_instance_count,
         })
     }
 
@@ -397,13 +424,53 @@ impl Engine {
 
     pub fn update(&mut self, dt: f32) {
         self.camera_controller.update_camera(&mut self.camera, dt);
-        self.camera_uniform
-            .update_view_proj(&self.camera, &self.projection);
+        self.camera_uniform.update_view_proj(
+            &self.camera,
+            &self.projection,
+            &mut self.camera_frustum,
+        );
         self.queue.write_buffer(
             &self.camera_buffer,
             0,
             bytemuck::cast_slice(&[self.camera_uniform]),
         );
+
+        let instance_data = self
+            .instances
+            .iter()
+            .map(Instance::to_raw)
+            .filter(|x| {
+                let aabb = camera::CustomAABB::new(
+                    x.model.column(3).xyz(),
+                    nalgebra::Vector3::new(1.0, 1.0, 1.0),
+                );
+                aabb.is_in_frustum(&self.camera_frustum, x)
+            })
+            .collect::<Vec<_>>();
+
+        // Guard against empty buffer — wgpu panics on zero-size buffer slices
+        let instance_data = if instance_data.is_empty() {
+            // Keep one dummy instance that's offscreen rather than crash
+            vec![
+                Instance {
+                    position: nalgebra::Vector3::new(f32::MAX, f32::MAX, f32::MAX),
+                    rotation: nalgebra::UnitQuaternion::identity(),
+                }
+                .to_raw(),
+            ]
+        } else {
+            instance_data
+        };
+
+        self.instance_buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Instance Buffer"),
+                contents: bytemuck::cast_slice(&instance_data),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+
+        self.visible_instance_count = instance_data.len() as u32;
     }
 
     pub fn render(&mut self, frametime: f32, ft_1pl: f32) -> color_eyre::Result<()> {
@@ -490,7 +557,7 @@ impl Engine {
 
             use model::DrawModel;
 
-            render_pass.draw_model_instanced(&self.gltf_model, 0..self.instances.len() as u32);
+            render_pass.draw_model_instanced(&self.gltf_model, 0..self.visible_instance_count);
 
             render_pass.end_pipeline_statistics_query();
         }

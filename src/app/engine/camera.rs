@@ -1,4 +1,4 @@
-use nalgebra::{Matrix4, Point3, Vector3};
+use nalgebra::{Matrix4, Point3, Vector3, Vector4};
 use winit::{dpi::PhysicalPosition, event::MouseScrollDelta, keyboard::KeyCode};
 
 pub struct Camera {
@@ -165,5 +165,119 @@ impl CameraController {
         self.rotate_vertical = 0.0;
 
         camera.pitch = camera.pitch.clamp(-VERTICAL_CLAMP, VERTICAL_CLAMP);
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct Plane {
+    normal: nalgebra::Vector4<f32>,
+}
+
+impl Plane {
+    fn from_column_matrix(column: nalgebra::Matrix4x1<f32>) -> Plane {
+        Plane {
+            normal: column / column.xyz().norm(),
+        }
+    }
+
+    fn from_column_view(column: nalgebra::MatrixView4x1<f32>) -> Plane {
+        Plane {
+            normal: column / column.xyz().norm(),
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct Frustum {
+    near_plane: Plane,
+    far_plane: Plane,
+    top_plane: Plane,
+    bottom_plane: Plane,
+    right_plane: Plane,
+    left_plane: Plane,
+}
+
+impl Frustum {
+    pub(crate) fn create_from_camera_projection(&mut self, view_proj: &nalgebra::Matrix4<f32>) {
+        let c1 = view_proj.row(0).transpose();
+        let c2 = view_proj.row(1).transpose();
+        let c3 = view_proj.row(2).transpose();
+        let c4 = view_proj.row(3).transpose();
+
+        self.near_plane = Plane::from_column_matrix(c4 + c3);
+        self.far_plane = Plane::from_column_matrix(c4 - c3);
+        self.top_plane = Plane::from_column_matrix(c4 - c2);
+        self.bottom_plane = Plane::from_column_matrix(c4 + c2);
+        self.right_plane = Plane::from_column_matrix(c4 - c1);
+        self.left_plane = Plane::from_column_matrix(c4 + c1);
+    }
+}
+
+pub trait BoundingVolume {
+    fn is_in_frustum(
+        &self,
+        camera_frustum: &Frustum,
+        transform: &crate::app::engine::InstanceRaw,
+    ) -> bool;
+
+    fn is_in_plane(&self, plane: &Plane) -> bool;
+}
+
+pub struct CustomAABB {
+    center: nalgebra::Vector3<f32>,
+    extents: nalgebra::Vector3<f32>,
+}
+
+impl CustomAABB {
+    pub fn new(center: nalgebra::Vector3<f32>, extents: nalgebra::Vector3<f32>) -> Self {
+        Self { center, extents }
+    }
+
+    #[allow(unused)]
+    fn new_min_max(min: &nalgebra::Vector3<f32>, max: &nalgebra::Vector3<f32>) -> Self {
+        let center = (min + max) * 0.5;
+        Self {
+            center,
+            extents: max - center,
+        }
+    }
+}
+
+impl BoundingVolume for CustomAABB {
+    fn is_in_frustum(
+        &self,
+        camera_frustum: &Frustum,
+        transform: &crate::app::engine::InstanceRaw,
+    ) -> bool {
+        let global_center = (transform.model * self.center.push(1.0)).xyz();
+
+        let right = transform.model.column(0).xyz() * self.extents.x;
+        let up = transform.model.column(1).xyz() * self.extents.y;
+        let forward = transform.model.column(2).xyz() * self.extents.z;
+
+        let new_i = right.x.abs() + up.x.abs() + forward.x.abs();
+        let new_j = right.y.abs() + up.y.abs() + forward.y.abs();
+        let new_k = right.z.abs() + up.z.abs() + forward.z.abs();
+
+        let transformed = CustomAABB {
+            center: global_center,
+            extents: nalgebra::Vector3::new(new_i, new_j, new_k),
+        };
+
+        transformed.is_in_plane(&camera_frustum.near_plane)
+            && transformed.is_in_plane(&camera_frustum.far_plane)
+            && transformed.is_in_plane(&camera_frustum.left_plane)
+            && transformed.is_in_plane(&camera_frustum.right_plane)
+            && transformed.is_in_plane(&camera_frustum.top_plane)
+            && transformed.is_in_plane(&camera_frustum.bottom_plane)
+    }
+
+    fn is_in_plane(&self, plane: &Plane) -> bool {
+        let projected_radius = self.extents.cross(&plane.normal.xyz()).abs().sum();
+        let signed_distance = plane.normal.dot(&self.center.push(1.0)) + plane.normal.w;
+
+        -projected_radius < signed_distance
     }
 }
