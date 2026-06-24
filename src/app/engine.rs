@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use eframe::{egui, egui_wgpu};
 use model::Vertex;
+use nalgebra as na;
 use wgpu::util::DeviceExt;
 use winit::{
     event::{MouseButton, MouseScrollDelta},
@@ -19,13 +20,13 @@ use winit::{
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct CameraUniform {
-    view_proj: nalgebra::Matrix4<f32>,
+    view_proj: na::Matrix4<f32>,
 }
 
 impl CameraUniform {
     fn new() -> Self {
         Self {
-            view_proj: nalgebra::Matrix4::identity(),
+            view_proj: na::Matrix4::identity(),
         }
     }
 
@@ -35,21 +36,20 @@ impl CameraUniform {
 }
 
 struct Instance {
-    position: nalgebra::Vector3<f32>,
-    rotation: nalgebra::UnitQuaternion<f32>,
+    position: na::Vector3<f32>,
+    rotation: na::UnitQuaternion<f32>,
 }
 
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct InstanceRaw {
-    model: nalgebra::Matrix4<f32>,
+    model: na::Matrix4<f32>,
 }
 
 impl Instance {
     fn to_raw(&self) -> InstanceRaw {
         InstanceRaw {
-            model: (nalgebra::Matrix4::new_translation(&self.position)
-                * self.rotation.to_homogeneous()),
+            model: (na::Matrix4::new_translation(&self.position) * self.rotation.to_homogeneous()),
         }
     }
 }
@@ -219,7 +219,7 @@ impl Engine {
         let egui_renderer =
             egui_renderer::EguiRenderer::new(&device, surface_format, None, 1, &window);
 
-        let camera = camera::Camera::new(nalgebra::Point3::new(0.0, 5.0, 10.0), -90f32, -20f32);
+        let camera = camera::Camera::new(na::Point3::new(0.0, 5.0, 10.0), -90f32, -20f32);
         let projection = camera::Projection::new(config.width, config.height, 45f32, 0.1, 1000.0);
         let camera_controller = camera::CameraController::new(4.0, 2.0);
 
@@ -332,13 +332,13 @@ impl Engine {
                     let x = SPACE_BETWEEN * (x as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
                     let z = SPACE_BETWEEN * (z as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
 
-                    let position = nalgebra::Vector3::new(x, 0.0, z);
+                    let position = na::Vector3::new(x, 0.0, z);
 
                     let rotation = if position.magnitude() == 0.0 {
-                        nalgebra::UnitQuaternion::from_axis_angle(&nalgebra::Vector3::z_axis(), 0.0)
+                        na::UnitQuaternion::from_axis_angle(&na::Vector3::z_axis(), 0.0)
                     } else {
-                        nalgebra::UnitQuaternion::from_axis_angle(
-                            &nalgebra::Unit::new_normalize(position),
+                        na::UnitQuaternion::from_axis_angle(
+                            &na::Unit::new_normalize(position),
                             std::f32::consts::FRAC_PI_4,
                         )
                     };
