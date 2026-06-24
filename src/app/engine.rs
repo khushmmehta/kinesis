@@ -10,12 +10,7 @@ use eframe::{egui, egui_wgpu};
 use model::Vertex;
 use nalgebra as na;
 use wgpu::util::DeviceExt;
-use winit::{
-    event::{MouseButton, MouseScrollDelta},
-    event_loop::ActiveEventLoop,
-    keyboard::KeyCode,
-    window::Window,
-};
+use winit::{event::MouseButton, event_loop::ActiveEventLoop, keyboard::KeyCode, window::Window};
 
 struct Instance {
     position: na::Vector3<f32>,
@@ -209,7 +204,7 @@ impl Engine {
 
         let camera = camera::Camera::new(na::Point3::new(0.0, 5.0, 10.0), -90f32, -20f32);
         let projection = camera::Projection::new(config.width, config.height, 45f32, 0.1, 1000.0);
-        let camera_controller = camera::CameraController::new(4.0, 2.0);
+        let camera_controller = camera::CameraController::new(10.0, 4.0);
 
         let mut camera_uniform = camera::CameraUniform::new();
         camera_uniform.update_view_proj(&camera, &projection);
@@ -449,9 +444,9 @@ impl Engine {
                     depth_slice: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.1,
-                            g: 0.2,
-                            b: 0.3,
+                            r: 0.0,
+                            g: 0.0,
+                            b: 0.0,
                             a: 1.0,
                         }),
                         store: wgpu::StoreOp::Store,
@@ -568,9 +563,5 @@ impl Engine {
         if button == MouseButton::Right {
             self.mouse_pressed = pressed
         }
-    }
-
-    pub fn handle_mouse_scroll(&mut self, delta: &MouseScrollDelta) {
-        self.camera_controller.handle_scroll(delta);
     }
 }

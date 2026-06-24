@@ -1,5 +1,5 @@
 use nalgebra::{Matrix4, Point3, Vector3};
-use winit::{dpi::PhysicalPosition, event::MouseScrollDelta, keyboard::KeyCode};
+use winit::keyboard::KeyCode;
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -82,7 +82,6 @@ pub struct CameraController {
     amount_down: f32,
     rotate_horizontal: f32,
     rotate_vertical: f32,
-    scroll: f32,
     multiplier: f32,
     speed: f32,
     sensitivity: f32,
@@ -99,7 +98,6 @@ impl CameraController {
             amount_down: 0.0,
             rotate_horizontal: 0.0,
             rotate_vertical: 0.0,
-            scroll: 0.0,
             multiplier: 1.0,
             speed,
             sensitivity,
@@ -147,16 +145,9 @@ impl CameraController {
         self.rotate_vertical = mouse_dy as f32;
     }
 
-    pub fn handle_scroll(&mut self, delta: &MouseScrollDelta) {
-        self.scroll = -match delta {
-            MouseScrollDelta::LineDelta(_, scroll) => -scroll * 0.5,
-            MouseScrollDelta::PixelDelta(PhysicalPosition { y: scroll, .. }) => -*scroll as f32,
-        }
-    }
-
     pub fn update_camera(&mut self, camera: &mut Camera, dt: f32) {
         let (yaw_sin, yaw_cos) = camera.yaw.sin_cos();
-        let (pitch_sin, pitch_cos) = camera.pitch.sin_cos();
+        let pitch_sin = camera.pitch.sin();
 
         let forward = Vector3::new(yaw_cos, pitch_sin, yaw_sin).normalize();
         let right = Vector3::new(-yaw_sin, 0.0, yaw_cos).normalize();
@@ -168,11 +159,6 @@ impl CameraController {
             * dt;
         camera.pos +=
             right * (self.amount_right - self.amount_left) * self.speed * self.multiplier * dt;
-
-        let scrollward =
-            Vector3::new(pitch_cos * yaw_cos, pitch_sin, pitch_cos * yaw_sin).normalize();
-        camera.pos += scrollward * self.scroll * self.speed * self.sensitivity * dt;
-        self.scroll = 0.0;
 
         camera.pos.y += (self.amount_up - self.amount_down) * self.speed * self.multiplier * dt;
 

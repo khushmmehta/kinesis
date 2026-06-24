@@ -104,7 +104,6 @@ impl ApplicationHandler<Engine> for App {
             WindowEvent::MouseInput { state, button, .. } => {
                 engine.handle_mouse_button(button, state.is_pressed())
             }
-            WindowEvent::MouseWheel { delta, .. } => engine.handle_mouse_scroll(&delta),
             WindowEvent::KeyboardInput {
                 event:
                     KeyEvent {
