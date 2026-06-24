@@ -364,11 +364,13 @@ impl Engine {
             .iter()
             .map(Instance::to_raw)
             .filter(|x| {
-                let aabb = camera::CustomAABB::new(
-                    x.model.column(3).xyz(),
-                    nalgebra::Vector3::new(1.0, 1.0, 1.0),
-                );
-                aabb.is_in_frustum(&camera_frustum, x)
+                // let mut aabb = camera::CustomAABB::new(
+                //     x.model.column(3).xyz(),
+                //     nalgebra::Vector3::new(1.0, 1.0, 1.0),
+                // );
+                // aabb.is_in_frustum(&camera_frustum, x)
+                let mut sphere_vol = camera::SphereVolume::new(x.model.column(3).xyz(), 1.7320509);
+                sphere_vol.is_in_frustum(&camera_frustum, x)
             })
             .collect::<Vec<_>>();
 
@@ -440,11 +442,13 @@ impl Engine {
             .iter()
             .map(Instance::to_raw)
             .filter(|x| {
-                let aabb = camera::CustomAABB::new(
-                    x.model.column(3).xyz(),
-                    nalgebra::Vector3::new(1.0, 1.0, 1.0),
-                );
-                aabb.is_in_frustum(&self.camera_frustum, x)
+                // let mut aabb = camera::CustomAABB::new(
+                //     x.model.column(3).xyz(),
+                //     nalgebra::Vector3::new(1.0, 1.0, 1.0),
+                // );
+                // aabb.is_in_frustum(&self.camera_frustum, x)
+                let mut sphere_vol = camera::SphereVolume::new(x.model.column(3).xyz(), 1.7320509);
+                sphere_vol.is_in_frustum(&self.camera_frustum, x)
             })
             .collect::<Vec<_>>();
 

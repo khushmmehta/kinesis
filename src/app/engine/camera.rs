@@ -1,4 +1,4 @@
-use nalgebra::{Matrix4, Point3, Vector3, Vector4};
+use nalgebra::{Matrix4, Matrix4x1, Point3, Vector3, Vector4};
 use winit::{dpi::PhysicalPosition, event::MouseScrollDelta, keyboard::KeyCode};
 
 pub struct Camera {
@@ -171,17 +171,11 @@ impl CameraController {
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Plane {
-    normal: nalgebra::Vector4<f32>,
+    normal: Vector4<f32>,
 }
 
 impl Plane {
-    fn from_column_matrix(column: nalgebra::Matrix4x1<f32>) -> Plane {
-        Plane {
-            normal: column / column.xyz().norm(),
-        }
-    }
-
-    fn from_column_view(column: nalgebra::MatrixView4x1<f32>) -> Plane {
+    fn from_column_matrix(column: Matrix4x1<f32>) -> Plane {
         Plane {
             normal: column / column.xyz().norm(),
         }
@@ -200,7 +194,7 @@ pub struct Frustum {
 }
 
 impl Frustum {
-    pub(crate) fn create_from_camera_projection(&mut self, view_proj: &nalgebra::Matrix4<f32>) {
+    pub(crate) fn create_from_camera_projection(&mut self, view_proj: &Matrix4<f32>) {
         let c1 = view_proj.row(0).transpose();
         let c2 = view_proj.row(1).transpose();
         let c3 = view_proj.row(2).transpose();
@@ -217,7 +211,7 @@ impl Frustum {
 
 pub trait BoundingVolume {
     fn is_in_frustum(
-        &self,
+        &mut self,
         camera_frustum: &Frustum,
         transform: &crate::app::engine::InstanceRaw,
     ) -> bool;
@@ -225,18 +219,52 @@ pub trait BoundingVolume {
     fn is_in_plane(&self, plane: &Plane) -> bool;
 }
 
+pub struct SphereVolume {
+    center: Vector3<f32>,
+    radius: f32,
+}
+
+impl SphereVolume {
+    pub fn new(center: Vector3<f32>, radius: f32) -> Self {
+        Self { center, radius }
+    }
+}
+
+impl BoundingVolume for SphereVolume {
+    fn is_in_frustum(
+        &mut self,
+        camera_frustum: &Frustum,
+        transform: &crate::app::engine::InstanceRaw,
+    ) -> bool {
+        let global_center = (transform.model * self.center.push(1.0)).xyz();
+
+        self.center = global_center;
+
+        self.is_in_plane(&camera_frustum.near_plane)
+            && self.is_in_plane(&camera_frustum.far_plane)
+            && self.is_in_plane(&camera_frustum.left_plane)
+            && self.is_in_plane(&camera_frustum.right_plane)
+            && self.is_in_plane(&camera_frustum.top_plane)
+            && self.is_in_plane(&camera_frustum.bottom_plane)
+    }
+
+    fn is_in_plane(&self, plane: &Plane) -> bool {
+        plane.normal.dot(&self.center.push(1.0)) + plane.normal.w > -self.radius
+    }
+}
+
 pub struct CustomAABB {
-    center: nalgebra::Vector3<f32>,
-    extents: nalgebra::Vector3<f32>,
+    center: Vector3<f32>,
+    extents: Vector3<f32>,
 }
 
 impl CustomAABB {
-    pub fn new(center: nalgebra::Vector3<f32>, extents: nalgebra::Vector3<f32>) -> Self {
+    pub fn new(center: Vector3<f32>, extents: Vector3<f32>) -> Self {
         Self { center, extents }
     }
 
     #[allow(unused)]
-    fn new_min_max(min: &nalgebra::Vector3<f32>, max: &nalgebra::Vector3<f32>) -> Self {
+    fn new_min_max(min: &Vector3<f32>, max: &Vector3<f32>) -> Self {
         let center = (min + max) * 0.5;
         Self {
             center,
@@ -247,7 +275,7 @@ impl CustomAABB {
 
 impl BoundingVolume for CustomAABB {
     fn is_in_frustum(
-        &self,
+        &mut self,
         camera_frustum: &Frustum,
         transform: &crate::app::engine::InstanceRaw,
     ) -> bool {
@@ -261,17 +289,15 @@ impl BoundingVolume for CustomAABB {
         let new_j = right.y.abs() + up.y.abs() + forward.y.abs();
         let new_k = right.z.abs() + up.z.abs() + forward.z.abs();
 
-        let transformed = CustomAABB {
-            center: global_center,
-            extents: nalgebra::Vector3::new(new_i, new_j, new_k),
-        };
+        self.center = global_center;
+        self.extents = Vector3::new(new_i, new_j, new_k);
 
-        transformed.is_in_plane(&camera_frustum.near_plane)
-            && transformed.is_in_plane(&camera_frustum.far_plane)
-            && transformed.is_in_plane(&camera_frustum.left_plane)
-            && transformed.is_in_plane(&camera_frustum.right_plane)
-            && transformed.is_in_plane(&camera_frustum.top_plane)
-            && transformed.is_in_plane(&camera_frustum.bottom_plane)
+        self.is_in_plane(&camera_frustum.near_plane)
+            && self.is_in_plane(&camera_frustum.far_plane)
+            && self.is_in_plane(&camera_frustum.left_plane)
+            && self.is_in_plane(&camera_frustum.right_plane)
+            && self.is_in_plane(&camera_frustum.top_plane)
+            && self.is_in_plane(&camera_frustum.bottom_plane)
     }
 
     fn is_in_plane(&self, plane: &Plane) -> bool {
