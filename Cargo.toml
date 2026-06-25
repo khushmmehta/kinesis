@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-bytemuck = { version = "1.25.0", features = ["derive"] }
+bytemuck = { version = "1.25.0", features = ["derive", "extern_crate_alloc"] }
 color-eyre = "0.6.5"
 eframe = "0.34.3"
 egui-winit = "0.34.3"

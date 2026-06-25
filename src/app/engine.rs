@@ -2,8 +2,10 @@ mod camera;
 mod egui_renderer;
 mod mipmapper;
 mod model;
+mod pipeline_statistics;
 mod resources;
 mod texture;
+
 use std::sync::Arc;
 
 use eframe::{egui, egui_wgpu};
@@ -64,20 +66,13 @@ impl InstanceRaw {
 }
 
 const NUM_INSTANCES_PER_ROW: u32 = 200;
-const NUM_PIPELINE_STATISTICS_QUERIES: u64 = 3;
 
 pub struct Engine {
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
-    // ABSTRACT AWAY THE QUERIES
-    query_set: wgpu::QuerySet,
-    stats_buffer: wgpu::Buffer,
-    stats_staging_buffer: wgpu::Buffer,
-    stats_data: [u64; NUM_PIPELINE_STATISTICS_QUERIES as usize],
-    stat_num_buf: num_format::Buffer,
-    //
+    queries: pipeline_statistics::Queries,
     is_surface_configured: bool,
     window: Arc<Window>,
     render_pipeline: wgpu::RenderPipeline,
@@ -152,29 +147,7 @@ impl Engine {
             desired_maximum_frame_latency: 2,
         };
 
-        let query_set = device.create_query_set(&wgpu::QuerySetDescriptor {
-            label: Some("Pipeline Statistics"),
-            ty: wgpu::QueryType::PipelineStatistics(
-                wgpu::PipelineStatisticsTypes::VERTEX_SHADER_INVOCATIONS
-                    | wgpu::PipelineStatisticsTypes::CLIPPER_INVOCATIONS
-                    | wgpu::PipelineStatisticsTypes::CLIPPER_PRIMITIVES_OUT,
-            ),
-            count: 1,
-        });
-
-        let stats_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Pipeline Statistics Readback"),
-            size: NUM_PIPELINE_STATISTICS_QUERIES * 8,
-            usage: wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::COPY_SRC,
-            mapped_at_creation: false,
-        });
-
-        let stats_staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("PSR Staging Buffer"),
-            size: NUM_PIPELINE_STATISTICS_QUERIES * 8,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
+        let queries = pipeline_statistics::Queries::new(&device);
 
         let texture_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -343,11 +316,7 @@ impl Engine {
             device,
             queue,
             config,
-            query_set,
-            stats_buffer,
-            stats_staging_buffer,
-            stats_data: [0, 0, 0],
-            stat_num_buf: num_format::Buffer::default(),
+            queries,
             is_surface_configured: false,
             window,
             render_pipeline,
@@ -390,8 +359,6 @@ impl Engine {
     }
 
     pub fn render(&mut self, frametime: f32, ft_1pl: f32) -> color_eyre::Result<()> {
-        self.window.request_redraw();
-
         if !self.is_surface_configured {
             return Ok(());
         }
@@ -465,7 +432,7 @@ impl Engine {
                 multiview_mask: None,
             });
 
-            render_pass.begin_pipeline_statistics_query(&self.query_set, 0);
+            render_pass.begin_pipeline_statistics_query(&self.queries.set, 0);
 
             render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
             render_pass.set_pipeline(&self.render_pipeline);
@@ -478,14 +445,7 @@ impl Engine {
             render_pass.end_pipeline_statistics_query();
         }
 
-        encoder.resolve_query_set(&self.query_set, 0..1, &self.stats_buffer, 0);
-        encoder.copy_buffer_to_buffer(
-            &self.stats_buffer,
-            0,
-            &self.stats_staging_buffer,
-            0,
-            NUM_PIPELINE_STATISTICS_QUERIES * 8,
-        );
+        self.queries.resolve(&mut encoder);
 
         {
             self.egui_renderer.begin_frame(&self.window);
@@ -497,25 +457,19 @@ impl Engine {
                     ui.label(format!("Frame Rate: {:.2}FPS", 1000.0 / frametime));
                     ui.label(format!("1% Lows: {:.2}FPS\n", 1.0 / ft_1pl));
 
-                    self.stat_num_buf
-                        .write_formatted(&self.stats_data[0], &num_format::Locale::en);
                     ui.label(format!(
                         "Vertex Shader Calls: {}",
-                        self.stat_num_buf.as_str()
+                        self.queries.results.vertex_shader_invocs
                     ));
 
-                    self.stat_num_buf
-                        .write_formatted(&self.stats_data[1], &num_format::Locale::en);
                     ui.label(format!(
                         "Triangles Sent:      {}",
-                        self.stat_num_buf.as_str()
+                        self.queries.results.clipper_invocs
                     ));
 
-                    self.stat_num_buf
-                        .write_formatted(&self.stats_data[2], &num_format::Locale::en);
                     ui.label(format!(
                         "Triangles Rendered:  {}",
-                        self.stat_num_buf.as_str()
+                        self.queries.results.clipper_prims_out
                     ));
                 },
             );
@@ -533,14 +487,7 @@ impl Engine {
         self.queue.submit([encoder.finish()]);
         output.present();
 
-        let stats_slice = self.stats_staging_buffer.slice(..);
-        stats_slice.map_async(wgpu::MapMode::Read, |_| {});
-        self.device.poll(wgpu::PollType::wait_indefinitely())?;
-        let stats_view = stats_slice.get_mapped_range();
-        self.stats_data = bytemuck::cast_slice(&stats_view).try_into()?;
-
-        drop(stats_view);
-        self.stats_staging_buffer.unmap();
+        self.queries.poll_queries(&self.device);
 
         self.window.request_redraw();
 
