@@ -2,7 +2,7 @@ mod camera;
 mod egui_renderer;
 mod mipmapper;
 mod model;
-mod pipeline_statistics;
+mod query;
 mod resources;
 mod texture;
 
@@ -72,7 +72,7 @@ pub struct Engine {
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
-    queries: pipeline_statistics::Queries,
+    queries: query::Queries,
     is_surface_configured: bool,
     window: Arc<Window>,
     render_pipeline: wgpu::RenderPipeline,
@@ -119,7 +119,8 @@ impl Engine {
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: None,
-                required_features: wgpu::Features::PIPELINE_STATISTICS_QUERY,
+                required_features: (wgpu::Features::PIPELINE_STATISTICS_QUERY
+                    | wgpu::Features::TIMESTAMP_QUERY),
                 experimental_features: wgpu::ExperimentalFeatures::disabled(),
                 required_limits: wgpu::Limits::default(),
                 memory_hints: wgpu::MemoryHints::Performance,
@@ -147,7 +148,7 @@ impl Engine {
             desired_maximum_frame_latency: 2,
         };
 
-        let queries = pipeline_statistics::Queries::new(&device);
+        let queries = query::Queries::new(&device);
 
         let texture_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -428,11 +429,15 @@ impl Engine {
                     stencil_ops: None,
                 }),
                 occlusion_query_set: None,
-                timestamp_writes: None,
+                timestamp_writes: Some(wgpu::RenderPassTimestampWrites {
+                    query_set: &self.queries.timestamps_set,
+                    beginning_of_pass_write_index: Some(0),
+                    end_of_pass_write_index: Some(1),
+                }),
                 multiview_mask: None,
             });
 
-            render_pass.begin_pipeline_statistics_query(&self.queries.set, 0);
+            render_pass.begin_pipeline_statistics_query(&self.queries.pipeline_stats_set, 0);
 
             render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
             render_pass.set_pipeline(&self.render_pipeline);
@@ -448,14 +453,19 @@ impl Engine {
         self.queries.resolve(&mut encoder);
 
         {
+            let gpu_time = self.queries.results.rpass_delta as f32
+                * self.queue.get_timestamp_period()
+                * 0.000001;
             self.egui_renderer.begin_frame(&self.window);
 
             egui::Window::new("Statistics").resizable(true).show(
                 self.egui_renderer.context(),
                 |ui| {
                     ui.label(format!("Frame Time: {frametime:.2}ms"));
+                    ui.label(format!("    CPU Time: {:.2}ms", frametime - gpu_time));
+                    ui.label(format!("    GPU Time: {:.2}ms\n", gpu_time));
                     ui.label(format!("Frame Rate: {:.2}FPS", 1000.0 / frametime));
-                    ui.label(format!("1% Lows: {:.2}FPS\n", 1.0 / ft_1pl));
+                    ui.label(format!("    1% Lows: {:.2}FPS\n", 1.0 / ft_1pl));
 
                     ui.label(format!(
                         "Vertex Shader Calls: {}",
