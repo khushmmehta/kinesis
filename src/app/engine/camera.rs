@@ -1,4 +1,5 @@
-use nalgebra::{Matrix4, Point3, Vector3};
+use na::{Matrix4, Point3, Vector3};
+use nalgebra as na;
 use winit::keyboard::KeyCode;
 
 #[repr(C)]
@@ -74,15 +75,12 @@ impl Projection {
 }
 
 pub struct CameraController {
-    amount_left: f32,
-    amount_right: f32,
-    amount_forward: f32,
-    amount_backward: f32,
-    amount_up: f32,
-    amount_down: f32,
+    amount_x: f32,
+    amount_y: f32,
+    amount_z: f32,
+    multiplier: f32,
     rotate_horizontal: f32,
     rotate_vertical: f32,
-    multiplier: f32,
     speed: f32,
     sensitivity: f32,
 }
@@ -90,15 +88,12 @@ pub struct CameraController {
 impl CameraController {
     pub fn new(speed: f32, sensitivity: f32) -> Self {
         Self {
-            amount_left: 0.0,
-            amount_right: 0.0,
-            amount_forward: 0.0,
-            amount_backward: 0.0,
-            amount_up: 0.0,
-            amount_down: 0.0,
+            amount_x: 0.0,
+            amount_y: 0.0,
+            amount_z: 0.0,
+            multiplier: 0.0,
             rotate_horizontal: 0.0,
             rotate_vertical: 0.0,
-            multiplier: 1.0,
             speed,
             sensitivity,
         }
@@ -107,13 +102,10 @@ impl CameraController {
     pub fn process_keyboard(&mut self, input: &winit_input_helper::WinitInputHelper) {
         let held = |key| input.key_held(key) as i32 as f32;
 
-        self.amount_forward = held(KeyCode::KeyW);
-        self.amount_backward = held(KeyCode::KeyS);
-        self.amount_left = held(KeyCode::KeyA);
-        self.amount_right = held(KeyCode::KeyD);
-        self.amount_up = held(KeyCode::Space);
-        self.amount_down = held(KeyCode::ControlLeft);
         self.multiplier = held(KeyCode::ShiftLeft) + 1.0;
+        self.amount_x = held(KeyCode::KeyD) - held(KeyCode::KeyA);
+        self.amount_y = held(KeyCode::Space) - held(KeyCode::ControlLeft);
+        self.amount_z = held(KeyCode::KeyW) - held(KeyCode::KeyS);
     }
 
     pub fn handle_mouse(&mut self, mouse_delta: (f32, f32)) {
@@ -125,18 +117,15 @@ impl CameraController {
         let (yaw_sin, yaw_cos) = camera.yaw.sin_cos();
         let pitch_sin = camera.pitch.sin();
 
-        let forward = Vector3::new(yaw_cos, pitch_sin, yaw_sin).normalize();
-        let right = Vector3::new(-yaw_sin, 0.0, yaw_cos).normalize();
+        let pos_delta = Vector3::new(
+            (yaw_cos * self.amount_z) - (yaw_sin * self.amount_x),
+            pitch_sin * self.amount_z + self.amount_y,
+            (yaw_sin * self.amount_z) + (yaw_cos * self.amount_x),
+        );
 
-        camera.pos += forward
-            * (self.amount_forward - self.amount_backward)
-            * self.speed
-            * self.multiplier
-            * dt;
-        camera.pos +=
-            right * (self.amount_right - self.amount_left) * self.speed * self.multiplier * dt;
-
-        camera.pos.y += (self.amount_up - self.amount_down) * self.speed * self.multiplier * dt;
+        if let Some(dir) = pos_delta.try_normalize(0.001) {
+            camera.pos += dir * self.speed * self.multiplier * dt;
+        }
 
         camera.yaw += self.rotate_horizontal.to_radians() * self.sensitivity * dt;
         camera.pitch += -self.rotate_vertical.to_radians() * self.sensitivity * dt;
