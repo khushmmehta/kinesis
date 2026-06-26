@@ -12,7 +12,7 @@ use eframe::{egui, egui_wgpu};
 use model::Vertex;
 use nalgebra as na;
 use wgpu::util::DeviceExt;
-use winit::{event::MouseButton, event_loop::ActiveEventLoop, keyboard::KeyCode, window::Window};
+use winit::window::Window;
 
 struct Instance {
     position: na::Vector3<f32>,
@@ -80,7 +80,6 @@ pub struct Engine {
     camera: camera::Camera,
     projection: camera::Projection,
     pub camera_controller: camera::CameraController,
-    pub mouse_pressed: bool,
     camera_uniform: camera::CameraUniform,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
@@ -325,7 +324,6 @@ impl Engine {
             projection,
             camera_controller,
             camera_uniform,
-            mouse_pressed: false,
             camera_buffer,
             camera_bind_group,
             instances,
@@ -506,19 +504,5 @@ impl Engine {
 
     pub fn handle_egui_input(&mut self, event: &winit::event::WindowEvent) {
         self.egui_renderer.handle_input(&self.window, event);
-    }
-
-    pub fn handle_key(&mut self, event_loop: &ActiveEventLoop, key: KeyCode, is_pressed: bool) {
-        if !self.camera_controller.process_keyboard(key, is_pressed)
-            && let (KeyCode::Escape, true) = (key, is_pressed)
-        {
-            event_loop.exit()
-        }
-    }
-
-    pub fn handle_mouse_button(&mut self, button: MouseButton, pressed: bool) {
-        if button == MouseButton::Right {
-            self.mouse_pressed = pressed
-        }
     }
 }

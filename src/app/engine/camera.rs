@@ -104,45 +104,21 @@ impl CameraController {
         }
     }
 
-    pub fn process_keyboard(&mut self, key: KeyCode, pressed: bool) -> bool {
-        let amount = if pressed { 1.0 } else { 0.0 };
+    pub fn process_keyboard(&mut self, input: &winit_input_helper::WinitInputHelper) {
+        let held = |key| input.key_held(key) as i32 as f32;
 
-        match key {
-            KeyCode::KeyW | KeyCode::ArrowUp => {
-                self.amount_forward = amount;
-                true
-            }
-            KeyCode::KeyS | KeyCode::ArrowDown => {
-                self.amount_backward = amount;
-                true
-            }
-            KeyCode::KeyA | KeyCode::ArrowLeft => {
-                self.amount_left = amount;
-                true
-            }
-            KeyCode::KeyD | KeyCode::ArrowRight => {
-                self.amount_right = amount;
-                true
-            }
-            KeyCode::Space => {
-                self.amount_up = amount;
-                true
-            }
-            KeyCode::ControlLeft => {
-                self.amount_down = amount;
-                true
-            }
-            KeyCode::ShiftLeft => {
-                self.multiplier = amount + 1.0;
-                true
-            }
-            _ => false,
-        }
+        self.amount_forward = held(KeyCode::KeyW);
+        self.amount_backward = held(KeyCode::KeyS);
+        self.amount_left = held(KeyCode::KeyA);
+        self.amount_right = held(KeyCode::KeyD);
+        self.amount_up = held(KeyCode::Space);
+        self.amount_down = held(KeyCode::ControlLeft);
+        self.multiplier = held(KeyCode::ShiftLeft) + 1.0;
     }
 
-    pub fn handle_mouse(&mut self, mouse_dx: f64, mouse_dy: f64) {
-        self.rotate_horizontal = mouse_dx as f32;
-        self.rotate_vertical = mouse_dy as f32;
+    pub fn handle_mouse(&mut self, mouse_delta: (f32, f32)) {
+        self.rotate_horizontal = mouse_delta.0;
+        self.rotate_vertical = mouse_delta.1;
     }
 
     pub fn update_camera(&mut self, camera: &mut Camera, dt: f32) {
