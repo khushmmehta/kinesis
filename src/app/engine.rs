@@ -78,9 +78,7 @@ pub struct Engine {
     render_pipeline: wgpu::RenderPipeline,
     // CAMERA SHOULD NOT BE A PART OF THE RENDER PIPELINE
     camera: camera::Camera,
-    projection: camera::Projection,
     pub camera_controller: camera::CameraController,
-    camera_uniform: camera::CameraUniform,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
     //
@@ -175,16 +173,20 @@ impl Engine {
         let egui_renderer =
             egui_renderer::EguiRenderer::new(&device, surface_format, None, 1, &window);
 
-        let camera = camera::Camera::new(na::Point3::new(0.0, 5.0, 10.0), -90f32, -20f32);
-        let projection = camera::Projection::new(config.width, config.height, 45f32, 0.1, 1000.0);
+        let camera = camera::Camera::new(
+            na::Point3::new(0.0, 5.0, 10.0),
+            -90f32,
+            -20f32,
+            config.width as f32 / config.height as f32,
+            45f32,
+            0.1,
+            1000.0,
+        );
         let camera_controller = camera::CameraController::new(10.0, 4.0);
-
-        let mut camera_uniform = camera::CameraUniform::new();
-        camera_uniform.update_view_proj(&camera, &projection);
 
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Camera Buffer"),
-            contents: bytemuck::cast_slice(&[camera_uniform]),
+            contents: bytemuck::cast_slice(&[camera.calc_matrix()]),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
@@ -321,9 +323,7 @@ impl Engine {
             window,
             render_pipeline,
             camera,
-            projection,
             camera_controller,
-            camera_uniform,
             camera_buffer,
             camera_bind_group,
             instances,
@@ -340,7 +340,7 @@ impl Engine {
             self.config.height = height;
             self.surface.configure(&self.device, &self.config);
             self.is_surface_configured = true;
-            self.projection.resize(width, height);
+            self.camera.resize(width, height);
             self.depth_texture =
                 texture::Texture::create_depth_texture(&self.device, &self.config, "depth_texture");
         }
@@ -348,12 +348,10 @@ impl Engine {
 
     pub fn update(&mut self, dt: f32) {
         self.camera_controller.update_camera(&mut self.camera, dt);
-        self.camera_uniform
-            .update_view_proj(&self.camera, &self.projection);
         self.queue.write_buffer(
             &self.camera_buffer,
             0,
-            bytemuck::cast_slice(&[self.camera_uniform]),
+            bytemuck::cast_slice(&[self.camera.calc_matrix()]),
         );
     }
 
