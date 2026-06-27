@@ -1,15 +1,12 @@
 use na::{Matrix4, Point3, Vector3};
-use nalgebra::{self as na, Vector2};
+use nalgebra::{self as na, Perspective3, Vector2};
 use winit::keyboard::KeyCode;
 
 pub struct Camera {
     pub pos: Point3<f32>,
     pub yaw: f32,
     pub pitch: f32,
-    aspect: f32,
-    fovy: f32,
-    znear: f32,
-    zfar: f32,
+    projection: Perspective3<f32>,
 }
 
 const VERTICAL_CLAMP: f32 = 80f32.to_radians();
@@ -28,15 +25,12 @@ impl Camera {
             pos,
             yaw: yaw.to_radians(),
             pitch: pitch.to_radians(),
-            aspect,
-            fovy,
-            znear,
-            zfar,
+            projection: Perspective3::new(aspect, fovy, znear, zfar),
         }
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
-        self.aspect = width as f32 / height as f32;
+        self.projection.set_aspect(width as f32 / height as f32);
     }
 
     pub fn calc_matrix(&self) -> Matrix4<f32> {
@@ -46,7 +40,7 @@ impl Camera {
         let direction =
             Vector3::new(cos_pitch * cos_yaw, sin_pitch, cos_pitch * sin_yaw).normalize();
 
-        Matrix4::new_perspective(self.aspect, self.fovy, self.znear, self.zfar)
+        self.projection.as_matrix()
             * Matrix4::look_at_rh(&self.pos, &(self.pos + direction), &Vector3::y())
     }
 }
