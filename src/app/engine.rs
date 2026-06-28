@@ -79,8 +79,7 @@ pub struct Engine {
     // CAMERA SHOULD NOT BE A PART OF THE RENDER PIPELINE
     camera: camera::Camera,
     pub camera_controller: camera::CameraController,
-    camera_buffer: wgpu::Buffer,
-    camera_bind_group: wgpu::BindGroup,
+    camera_gpu: camera::CameraGPU,
     //
     depth_texture: texture::Texture,
     // MODEL DATA SHOULD BE DYNAMIC AND NOT HARD CODED INTO THE PIPELINE
@@ -173,46 +172,13 @@ impl Engine {
         let egui_renderer =
             egui_renderer::EguiRenderer::new(&device, surface_format, None, 1, &window);
 
-        let camera = camera::Camera::new(
-            na::Point3::new(0.0, 5.0, 10.0),
-            -90f32,
-            -20f32,
-            config.width as f32 / config.height as f32,
-            45f32,
-            0.1,
-            1000.0,
-        );
+        let camera = camera::Builder::new()
+            .position(0.0, 5.0, 10.0)
+            .rotation(-90.0, -20.0)
+            .perspective(config.width, config.height, 45.0, 0.1, 1000.0)
+            .build();
         let camera_controller = camera::CameraController::new(10.0, 4.0);
-
-        let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Camera Buffer"),
-            contents: bytemuck::cast_slice(&[camera.calc_matrix()]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-
-        let camera_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                }],
-                label: Some("camera_bind_group_layout"),
-            });
-
-        let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &camera_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: camera_buffer.as_entire_binding(),
-            }],
-            label: Some("camera_bind_group"),
-        });
+        let (camera_gpu, camera_bind_group_layout) = camera::CameraGPU::new(&device, &camera);
 
         let shader =
             device.create_shader_module(wgpu::include_spirv!("../../res/shaders/shader.spv"));
@@ -324,8 +290,7 @@ impl Engine {
             render_pipeline,
             camera,
             camera_controller,
-            camera_buffer,
-            camera_bind_group,
+            camera_gpu,
             instances,
             instance_buffer,
             depth_texture,
@@ -348,11 +313,7 @@ impl Engine {
 
     pub fn update(&mut self, dt: f32) {
         self.camera_controller.update_camera(&mut self.camera, dt);
-        self.queue.write_buffer(
-            &self.camera_buffer,
-            0,
-            bytemuck::cast_slice(&[self.camera.calc_matrix()]),
-        );
+        self.camera_gpu.update_buffer(&self.queue, &self.camera);
     }
 
     pub fn render(&mut self, frametime: f32, ft_1pl: f32) -> color_eyre::Result<()> {
@@ -437,7 +398,7 @@ impl Engine {
 
             render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
             render_pass.set_pipeline(&self.render_pipeline);
-            render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
+            render_pass.set_bind_group(1, &self.camera_gpu.bind_group, &[]);
 
             use model::DrawModel;
 
