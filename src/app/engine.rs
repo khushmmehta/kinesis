@@ -8,6 +8,7 @@ mod texture;
 
 use std::sync::Arc;
 
+use bytemuck::Zeroable;
 use eframe::{egui, egui_wgpu};
 use model::Vertex;
 use nalgebra as na;
@@ -88,6 +89,7 @@ pub struct Engine {
     gltf_model: model::Model,
     //
     egui_renderer: egui_renderer::EguiRenderer,
+    visible_instance_count: u32,
 }
 
 impl Engine {
@@ -272,7 +274,22 @@ impl Engine {
             })
             .collect::<Vec<_>>();
 
-        let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
+        let instance_data = instances
+            .iter()
+            .map(Instance::to_raw)
+            .filter(|x| {
+                // let mut aabb = camera::CustomAABB::new(
+                //     x.model.column(3).xyz(),
+                //     nalgebra::Vector3::new(1.0, 1.0, 1.0),
+                // );
+                // aabb.is_in_frustum(&camera_frustum, x)
+                let mut sphere_vol = camera::SphereVolume::new(x.model.column(3).xyz(), 1.7320509);
+                sphere_vol.is_in_frustum(&camera_frustum, x)
+            })
+            .collect::<Vec<_>>();
+
+        let visible_instance_count = instance_data.len() as u32;
+
         let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Instance Buffer"),
             contents: bytemuck::cast_slice(&instance_data),
@@ -296,6 +313,7 @@ impl Engine {
             depth_texture,
             gltf_model,
             egui_renderer,
+            visible_instance_count,
         })
     }
 
@@ -402,7 +420,7 @@ impl Engine {
 
             use model::DrawModel;
 
-            render_pass.draw_model_instanced(&self.gltf_model, 0..self.instances.len() as u32);
+            render_pass.draw_model_instanced(&self.gltf_model, 0..self.visible_instance_count);
 
             render_pass.end_pipeline_statistics_query();
         }
