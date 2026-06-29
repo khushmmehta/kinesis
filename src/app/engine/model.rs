@@ -1,6 +1,7 @@
 use std::ops::Range;
 
 use super::texture;
+use nalgebra as na;
 
 pub trait Vertex {
     fn desc() -> wgpu::VertexBufferLayout<'static>;
@@ -9,9 +10,9 @@ pub trait Vertex {
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct ModelVertex {
-    pub position: nalgebra::Point3<f32>,
-    pub tex_coord: nalgebra::Point2<f32>,
-    pub normal: nalgebra::Point3<f32>,
+    pub position: na::Point3<f32>,
+    pub tex_coord: na::Point2<f32>,
+    pub normal: na::Point3<f32>,
 }
 
 impl Vertex for ModelVertex {

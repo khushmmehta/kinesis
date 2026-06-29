@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-bytemuck = { version = "1.25.0", features = ["derive"] }
+bytemuck = { version = "1.25.0", features = ["derive", "extern_crate_alloc"] }
 color-eyre = "0.6.5"
 eframe = "0.34.3"
 egui-winit = "0.34.3"
@@ -21,9 +21,9 @@ log = "0.4.32"
 nalgebra = { version = "0.35.0", features = ["bytemuck"] }
 num-format = { version = "0.4.4", default-features = false }
 pollster = "0.4.0"
-rayon = "1.12.0"
 wgpu = { version = "29.0.3", features = ["spirv"] }
 winit = "0.30.13"
+winit_input_helper = "0.17.0"
 
 [profile.dev]
 opt-level = 1

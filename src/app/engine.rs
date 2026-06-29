@@ -2,63 +2,34 @@ mod camera;
 mod egui_renderer;
 mod mipmapper;
 mod model;
+mod query;
 mod resources;
 mod texture;
+
 use std::sync::Arc;
 
 use bytemuck::Zeroable;
 use eframe::{egui, egui_wgpu};
 use model::Vertex;
+use nalgebra as na;
 use wgpu::util::DeviceExt;
-use winit::{
-    event::{MouseButton, MouseScrollDelta},
-    event_loop::ActiveEventLoop,
-    keyboard::KeyCode,
-    window::Window,
-};
-
-use crate::app::engine::camera::BoundingVolume;
-
-#[repr(C)]
-#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-struct CameraUniform {
-    view_proj: nalgebra::Matrix4<f32>,
-}
-
-impl CameraUniform {
-    fn new() -> Self {
-        Self {
-            view_proj: nalgebra::Matrix4::identity(),
-        }
-    }
-
-    fn update_view_proj(
-        &mut self,
-        camera: &camera::Camera,
-        projection: &camera::Projection,
-        frustum: &mut camera::Frustum,
-    ) {
-        self.view_proj = projection.calc_matrix() * camera.calc_matrix();
-        frustum.create_from_camera_projection(&self.view_proj);
-    }
-}
+use winit::window::Window;
 
 struct Instance {
-    position: nalgebra::Vector3<f32>,
-    rotation: nalgebra::UnitQuaternion<f32>,
+    position: na::Vector3<f32>,
+    rotation: na::UnitQuaternion<f32>,
 }
 
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct InstanceRaw {
-    model: nalgebra::Matrix4<f32>,
+    model: na::Matrix4<f32>,
 }
 
 impl Instance {
     fn to_raw(&self) -> InstanceRaw {
         InstanceRaw {
-            model: (nalgebra::Matrix4::new_translation(&self.position)
-                * self.rotation.to_homogeneous()),
+            model: (na::Matrix4::new_translation(&self.position) * self.rotation.to_homogeneous()),
         }
     }
 }
@@ -96,33 +67,27 @@ impl InstanceRaw {
 }
 
 const NUM_INSTANCES_PER_ROW: u32 = 200;
-const NUM_PIPELINE_STATISTICS_QUERIES: u64 = 3;
 
 pub struct Engine {
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
-    query_set: wgpu::QuerySet,
-    stats_buffer: wgpu::Buffer,
-    stats_staging_buffer: wgpu::Buffer,
-    stats_data: [u64; NUM_PIPELINE_STATISTICS_QUERIES as usize],
-    stat_num_buf: num_format::Buffer,
+    queries: query::Queries,
     is_surface_configured: bool,
     window: Arc<Window>,
     render_pipeline: wgpu::RenderPipeline,
+    // CAMERA SHOULD NOT BE A PART OF THE RENDER PIPELINE
     camera: camera::Camera,
-    projection: camera::Projection,
     pub camera_controller: camera::CameraController,
-    pub mouse_pressed: bool,
-    camera_frustum: camera::Frustum,
-    camera_uniform: CameraUniform,
-    camera_buffer: wgpu::Buffer,
-    camera_bind_group: wgpu::BindGroup,
+    camera_gpu: camera::CameraGPU,
+    //
+    depth_texture: texture::Texture,
+    // MODEL DATA SHOULD BE DYNAMIC AND NOT HARD CODED INTO THE PIPELINE
     instances: Vec<Instance>,
     instance_buffer: wgpu::Buffer,
-    depth_texture: texture::Texture,
     gltf_model: model::Model,
+    //
     egui_renderer: egui_renderer::EguiRenderer,
     visible_instance_count: u32,
 }
@@ -152,7 +117,8 @@ impl Engine {
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: None,
-                required_features: wgpu::Features::PIPELINE_STATISTICS_QUERY,
+                required_features: (wgpu::Features::PIPELINE_STATISTICS_QUERY
+                    | wgpu::Features::TIMESTAMP_QUERY),
                 experimental_features: wgpu::ExperimentalFeatures::disabled(),
                 required_limits: wgpu::Limits::default(),
                 memory_hints: wgpu::MemoryHints::Performance,
@@ -180,29 +146,7 @@ impl Engine {
             desired_maximum_frame_latency: 2,
         };
 
-        let query_set = device.create_query_set(&wgpu::QuerySetDescriptor {
-            label: Some("Pipeline Statistics"),
-            ty: wgpu::QueryType::PipelineStatistics(
-                wgpu::PipelineStatisticsTypes::VERTEX_SHADER_INVOCATIONS
-                    | wgpu::PipelineStatisticsTypes::CLIPPER_INVOCATIONS
-                    | wgpu::PipelineStatisticsTypes::CLIPPER_PRIMITIVES_OUT,
-            ),
-            count: 1,
-        });
-
-        let stats_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Pipeline Statistics Readback"),
-            size: NUM_PIPELINE_STATISTICS_QUERIES * 8,
-            usage: wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::COPY_SRC,
-            mapped_at_creation: false,
-        });
-
-        let stats_staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("PSR Staging Buffer"),
-            size: NUM_PIPELINE_STATISTICS_QUERIES * 8,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
+        let queries = query::Queries::new(&device);
 
         let texture_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -230,43 +174,13 @@ impl Engine {
         let egui_renderer =
             egui_renderer::EguiRenderer::new(&device, surface_format, None, 1, &window);
 
-        let camera = camera::Camera::new(nalgebra::Point3::new(0.0, 5.0, 10.0), -90f32, -20f32);
-        let projection = camera::Projection::new(config.width, config.height, 45f32, 0.1, 1000.0);
-        let camera_controller = camera::CameraController::new(4.0, 2.0);
-        let mut camera_frustum = camera::Frustum::zeroed();
-
-        let mut camera_uniform = CameraUniform::new();
-        camera_uniform.update_view_proj(&camera, &projection, &mut camera_frustum);
-
-        let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Camera Buffer"),
-            contents: bytemuck::cast_slice(&[camera_uniform]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-
-        let camera_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                }],
-                label: Some("camera_bind_group_layout"),
-            });
-
-        let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &camera_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: camera_buffer.as_entire_binding(),
-            }],
-            label: Some("camera_bind_group"),
-        });
+        let camera = camera::Builder::new()
+            .position(0.0, 5.0, 10.0)
+            .rotation(-90.0, -20.0)
+            .perspective(config.width, config.height, 45.0, 0.1, 1000.0)
+            .build();
+        let camera_controller = camera::CameraController::new(10.0, 4.0);
+        let (camera_gpu, camera_bind_group_layout) = camera::CameraGPU::new(&device, &camera);
 
         let shader =
             device.create_shader_module(wgpu::include_spirv!("../../res/shaders/shader.spv"));
@@ -344,13 +258,13 @@ impl Engine {
                     let x = SPACE_BETWEEN * (x as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
                     let z = SPACE_BETWEEN * (z as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
 
-                    let position = nalgebra::Vector3::new(x, 0.0, z);
+                    let position = na::Vector3::new(x, 0.0, z);
 
                     let rotation = if position.magnitude() == 0.0 {
-                        nalgebra::UnitQuaternion::from_axis_angle(&nalgebra::Vector3::z_axis(), 0.0)
+                        na::UnitQuaternion::from_axis_angle(&na::Vector3::z_axis(), 0.0)
                     } else {
-                        nalgebra::UnitQuaternion::from_axis_angle(
-                            &nalgebra::Unit::new_normalize(position),
+                        na::UnitQuaternion::from_axis_angle(
+                            &na::Unit::new_normalize(position),
                             std::f32::consts::FRAC_PI_4,
                         )
                     };
@@ -387,22 +301,13 @@ impl Engine {
             device,
             queue,
             config,
-            query_set,
-            stats_buffer,
-            stats_staging_buffer,
-            stats_data: [0, 0, 0],
-            stat_num_buf: num_format::Buffer::default(),
+            queries,
             is_surface_configured: false,
             window,
             render_pipeline,
             camera,
-            projection,
             camera_controller,
-            camera_frustum,
-            camera_uniform,
-            mouse_pressed: false,
-            camera_buffer,
-            camera_bind_group,
+            camera_gpu,
             instances,
             instance_buffer,
             depth_texture,
@@ -418,7 +323,7 @@ impl Engine {
             self.config.height = height;
             self.surface.configure(&self.device, &self.config);
             self.is_surface_configured = true;
-            self.projection.resize(width, height);
+            self.camera.resize(width, height);
             self.depth_texture =
                 texture::Texture::create_depth_texture(&self.device, &self.config, "depth_texture");
         }
@@ -426,60 +331,10 @@ impl Engine {
 
     pub fn update(&mut self, dt: f32) {
         self.camera_controller.update_camera(&mut self.camera, dt);
-        self.camera_uniform.update_view_proj(
-            &self.camera,
-            &self.projection,
-            &mut self.camera_frustum,
-        );
-        self.queue.write_buffer(
-            &self.camera_buffer,
-            0,
-            bytemuck::cast_slice(&[self.camera_uniform]),
-        );
-
-        let instance_data = self
-            .instances
-            .iter()
-            .map(Instance::to_raw)
-            .filter(|x| {
-                // let mut aabb = camera::CustomAABB::new(
-                //     x.model.column(3).xyz(),
-                //     nalgebra::Vector3::new(1.0, 1.0, 1.0),
-                // );
-                // aabb.is_in_frustum(&self.camera_frustum, x)
-                let mut sphere_vol = camera::SphereVolume::new(x.model.column(3).xyz(), 1.7320509);
-                sphere_vol.is_in_frustum(&self.camera_frustum, x)
-            })
-            .collect::<Vec<_>>();
-
-        // Guard against empty buffer — wgpu panics on zero-size buffer slices
-        let instance_data = if instance_data.is_empty() {
-            // Keep one dummy instance that's offscreen rather than crash
-            vec![
-                Instance {
-                    position: nalgebra::Vector3::new(f32::MAX, f32::MAX, f32::MAX),
-                    rotation: nalgebra::UnitQuaternion::identity(),
-                }
-                .to_raw(),
-            ]
-        } else {
-            instance_data
-        };
-
-        self.instance_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Instance Buffer"),
-                contents: bytemuck::cast_slice(&instance_data),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
-
-        self.visible_instance_count = instance_data.len() as u32;
+        self.camera_gpu.update_buffer(&self.queue, &self.camera);
     }
 
     pub fn render(&mut self, frametime: f32, ft_1pl: f32) -> color_eyre::Result<()> {
-        self.window.request_redraw();
-
         if !self.is_surface_configured {
             return Ok(());
         }
@@ -532,9 +387,9 @@ impl Engine {
                     depth_slice: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.1,
-                            g: 0.2,
-                            b: 0.3,
+                            r: 0.0,
+                            g: 0.0,
+                            b: 0.0,
                             a: 1.0,
                         }),
                         store: wgpu::StoreOp::Store,
@@ -549,15 +404,19 @@ impl Engine {
                     stencil_ops: None,
                 }),
                 occlusion_query_set: None,
-                timestamp_writes: None,
+                timestamp_writes: Some(wgpu::RenderPassTimestampWrites {
+                    query_set: &self.queries.timestamps_set,
+                    beginning_of_pass_write_index: Some(0),
+                    end_of_pass_write_index: Some(1),
+                }),
                 multiview_mask: None,
             });
 
-            render_pass.begin_pipeline_statistics_query(&self.query_set, 0);
+            render_pass.begin_pipeline_statistics_query(&self.queries.pipeline_stats_set, 0);
 
             render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
             render_pass.set_pipeline(&self.render_pipeline);
-            render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
+            render_pass.set_bind_group(1, &self.camera_gpu.bind_group, &[]);
 
             use model::DrawModel;
 
@@ -566,44 +425,36 @@ impl Engine {
             render_pass.end_pipeline_statistics_query();
         }
 
-        encoder.resolve_query_set(&self.query_set, 0..1, &self.stats_buffer, 0);
-        encoder.copy_buffer_to_buffer(
-            &self.stats_buffer,
-            0,
-            &self.stats_staging_buffer,
-            0,
-            NUM_PIPELINE_STATISTICS_QUERIES * 8,
-        );
+        self.queries.resolve(&mut encoder);
 
         {
+            let gpu_time = self.queries.results.rpass_delta as f32
+                * self.queue.get_timestamp_period()
+                * 0.000001;
             self.egui_renderer.begin_frame(&self.window);
 
             egui::Window::new("Statistics").resizable(true).show(
                 self.egui_renderer.context(),
                 |ui| {
                     ui.label(format!("Frame Time: {frametime:.2}ms"));
+                    ui.label(format!("    CPU Time: {:.2}ms", frametime - gpu_time));
+                    ui.label(format!("    GPU Time: {:.2}ms\n", gpu_time));
                     ui.label(format!("Frame Rate: {:.2}FPS", 1000.0 / frametime));
-                    ui.label(format!("1% Lows: {:.2}FPS\n", 1.0 / ft_1pl));
+                    ui.label(format!("    1% Lows: {:.2}FPS\n", 1.0 / ft_1pl));
 
-                    self.stat_num_buf
-                        .write_formatted(&self.stats_data[0], &num_format::Locale::en);
                     ui.label(format!(
                         "Vertex Shader Calls: {}",
-                        self.stat_num_buf.as_str()
+                        self.queries.results.vertex_shader_invocs
                     ));
 
-                    self.stat_num_buf
-                        .write_formatted(&self.stats_data[1], &num_format::Locale::en);
                     ui.label(format!(
                         "Triangles Sent:      {}",
-                        self.stat_num_buf.as_str()
+                        self.queries.results.clipper_invocs
                     ));
 
-                    self.stat_num_buf
-                        .write_formatted(&self.stats_data[2], &num_format::Locale::en);
                     ui.label(format!(
                         "Triangles Rendered:  {}",
-                        self.stat_num_buf.as_str()
+                        self.queries.results.clipper_prims_out
                     ));
                 },
             );
@@ -621,14 +472,7 @@ impl Engine {
         self.queue.submit([encoder.finish()]);
         output.present();
 
-        let stats_slice = self.stats_staging_buffer.slice(..);
-        stats_slice.map_async(wgpu::MapMode::Read, |_| {});
-        self.device.poll(wgpu::PollType::wait_indefinitely())?;
-        let stats_view = stats_slice.get_mapped_range();
-        self.stats_data = bytemuck::cast_slice(&stats_view).try_into()?;
-
-        drop(stats_view);
-        self.stats_staging_buffer.unmap();
+        self.queries.poll_queries(&self.device);
 
         self.window.request_redraw();
 
@@ -637,23 +481,5 @@ impl Engine {
 
     pub fn handle_egui_input(&mut self, event: &winit::event::WindowEvent) {
         self.egui_renderer.handle_input(&self.window, event);
-    }
-
-    pub fn handle_key(&mut self, event_loop: &ActiveEventLoop, key: KeyCode, is_pressed: bool) {
-        if !self.camera_controller.process_keyboard(key, is_pressed)
-            && let (KeyCode::Escape, true) = (key, is_pressed)
-        {
-            event_loop.exit()
-        }
-    }
-
-    pub fn handle_mouse_button(&mut self, button: MouseButton, pressed: bool) {
-        if button == MouseButton::Right {
-            self.mouse_pressed = pressed
-        }
-    }
-
-    pub fn handle_mouse_scroll(&mut self, delta: &MouseScrollDelta) {
-        self.camera_controller.handle_scroll(delta);
     }
 }
